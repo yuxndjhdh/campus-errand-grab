@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Project-local Maven settings. ALWAYS build with:
+      mvn -s mvn-settings.xml ...
+
+  Why this file exists: the user-level C:\Users\YU\.m2\settings.xml defines a mirror
+  <id>gc</id> with <mirrorOf>*</mirrorOf> pointing at an internal LAN Nexus
+  (http://192.168.0.110:8801/nexus/...) that is no longer reachable. Because its
+  mirrorOf is '*', it also shadows the aliyun mirror declared below it, so every
+  artifact resolution (including from Maven Central) would hang against the dead host.
+
+  Passing -s REPLACES the user settings rather than merging with them, so the dead
+  mirror simply does not exist for this build. Note this also drops the user's
+  <servers> block, which is deliberate: aliyun's public group is anonymous, so those
+  credentials are not sent to a third party.
+-->
+<settings xmlns="http://maven.apache.org/SETTINGS/1.1.0"
+          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+          xsi:schemaLocation="http://maven.apache.org/SETTINGS/1.1.0
+                              http://maven.apache.org/xsd/settings-1.1.0.xsd">
+
+  <localRepository>C:/Users/YU/.m2/repository</localRepository>
+
+  <mirrors>
+    <mirror>
+      <id>aliyun-public</id>
+      <mirrorOf>*</mirrorOf>
+      <url>https://maven.aliyun.com/repository/public/</url>
+    </mirror>
+  </mirrors>
+
+  <profiles>
+    <profile>
+      <id>aliyun-repos</id>
+      <repositories>
+        <repository>
+          <id>aliyun-public</id>
+          <url>https://maven.aliyun.com/repository/public/</url>
+          <releases><enabled>true</enabled></releases>
+          <snapshots><enabled>false</enabled></snapshots>
+        </repository>
+      </repositories>
+      <pluginRepositories>
+        <pluginRepository>
+          <id>aliyun-public</id>
+          <url>https://maven.aliyun.com/repository/public/</url>
+          <releases><enabled>true</enabled></releases>
+          <snapshots><enabled>false</enabled></snapshots>
+        </pluginRepository>
+      </pluginRepositories>
+    </profile>
+  </profiles>
+
+  <activeProfiles>
+    <activeProfile>aliyun-repos</activeProfile>
+  </activeProfiles>
+
+</settings>
