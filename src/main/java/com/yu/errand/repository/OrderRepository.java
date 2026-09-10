@@ -129,6 +129,11 @@ public class OrderRepository {
         return value == null ? 0L : value;
     }
 
+    public long countSettlementDead() {
+        Long value = jdbc.queryForObject("SELECT COUNT(*) FROM t_errand_order WHERE settlement_dead=1", Long.class);
+        return value == null ? 0L : value;
+    }
+
     private String selectSql() {
         return "SELECT o.id,o.publisher_id,o.taker_id,o.title,o.detail,o.reward_cents,o.commission_cents,o.status," +
                 "o.claim_deadline_at,o.deliver_deadline_at,o.grabbed_at,o.delivered_at,o.settled_at,o.cancelled_at," +

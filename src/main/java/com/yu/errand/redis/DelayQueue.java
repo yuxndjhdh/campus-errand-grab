@@ -1,5 +1,6 @@
 package com.yu.errand.redis;
 
+import com.yu.errand.monitoring.ReliabilityMetrics;
 import org.springframework.dao.DataAccessException;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Component;
@@ -13,8 +14,12 @@ public class DelayQueue {
     public static final String CLAIM_KEY = "delay:claim";
     public static final String DELIVER_KEY = "delay:deliver";
     private final StringRedisTemplate redis;
+    private final ReliabilityMetrics metrics;
 
-    public DelayQueue(StringRedisTemplate redis) { this.redis = redis; }
+    public DelayQueue(StringRedisTemplate redis, ReliabilityMetrics metrics) {
+        this.redis = redis;
+        this.metrics = metrics;
+    }
 
     public void addClaim(long orderId, LocalDateTime deadline) { add(CLAIM_KEY, "CLAIM:" + orderId, deadline); }
     public void addDeliver(long orderId, LocalDateTime deadline) { add(DELIVER_KEY, "DELIVER:" + orderId, deadline); }
@@ -26,18 +31,28 @@ public class DelayQueue {
             Set<String> values = redis.opsForZSet().rangeByScore(key, Double.NEGATIVE_INFINITY, nowMillis, 0, limit);
             return values == null ? Set.of() : values;
         } catch (DataAccessException ex) {
+            metrics.redisDegraded();
             return Set.of();
         }
     }
 
+    public Double score(String key, String member) {
+        try {
+            return redis.opsForZSet().score(key, member);
+        } catch (DataAccessException ex) {
+            metrics.redisDegraded();
+            return null;
+        }
+    }
+
     public void remove(String key, String member) {
-        try { removeStrict(key, member); } catch (DataAccessException ex) { }
+        try { removeStrict(key, member); } catch (DataAccessException ex) { metrics.redisDegraded(); }
     }
 
     public void removeStrict(String key, String member) { redis.opsForZSet().remove(key, member); }
 
     private void add(String key, String member, LocalDateTime deadline) {
-        try { addStrict(key, member, deadline); } catch (DataAccessException ex) { }
+        try { addStrict(key, member, deadline); } catch (DataAccessException ex) { metrics.redisDegraded(); }
     }
 
     private void addStrict(String key, String member, LocalDateTime deadline) {

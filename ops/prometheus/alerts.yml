@@ -1,0 +1,60 @@
+groups:
+  - name: campus-errand-reliability
+    rules:
+      - alert: CampusErrandOutboxDead
+        expr: outbox_dead > 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: Outbox contains dead events
+          description: One or more Outbox events require replay or manual intervention.
+
+      - alert: CampusErrandReconFailure
+        expr: increase(recon_failure_total[5m]) > 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: Financial reconciliation failed
+          description: At least one reconciliation run failed during the last five minutes.
+
+      - alert: CampusErrandOutboxBacklogGrowing
+        expr: deriv(outbox_pending[10m]) > 0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: Outbox backlog is growing
+          description: Pending Outbox events have increased continuously for ten minutes.
+
+      - alert: CampusErrandTimeoutQueueLagHigh
+        expr: timeout_queue_lag_seconds > 30
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: Timeout queue is falling behind
+          description: The oldest observed due timeout event is more than thirty seconds late.
+
+      - alert: CampusErrandRedisDegraded
+        expr: increase(redis_degraded_total[5m]) > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Redis fallback path is active
+          description: Redis operations have degraded to the database-safe path during the last five minutes.
+
+      - alert: CampusErrandHttp5xxHigh
+        expr: |
+          sum(rate(http_server_requests_seconds_count{status=~"5.."}[5m]))
+          /
+          clamp_min(sum(rate(http_server_requests_seconds_count[5m])), 1)
+          > 0.05
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: HTTP 5xx ratio is high
+          description: More than five percent of HTTP requests have returned a 5xx status for five minutes.

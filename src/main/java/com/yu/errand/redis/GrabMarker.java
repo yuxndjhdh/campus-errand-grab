@@ -1,6 +1,7 @@
 package com.yu.errand.redis;
 
 import com.yu.errand.config.GrabProperties;
+import com.yu.errand.monitoring.ReliabilityMetrics;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataAccessException;
@@ -21,13 +22,16 @@ public class GrabMarker {
     private final DefaultRedisScript<Long> filterScript;
     private final DefaultRedisScript<Long> rearmScript;
     private final GrabProperties properties;
+    private final ReliabilityMetrics metrics;
 
     public GrabMarker(StringRedisTemplate redis, DefaultRedisScript<Long> grabFilterScript,
-                      DefaultRedisScript<Long> grabMarkerRearmScript, GrabProperties properties) {
+                      DefaultRedisScript<Long> grabMarkerRearmScript, GrabProperties properties,
+                      ReliabilityMetrics metrics) {
         this.redis = redis;
         this.filterScript = grabFilterScript;
         this.rearmScript = grabMarkerRearmScript;
         this.properties = properties;
+        this.metrics = metrics;
     }
 
     public void arm(long orderId, LocalDateTime deadline) {
@@ -38,6 +42,7 @@ public class GrabMarker {
         try {
             armStrict(orderId, deadline, publisherId);
         } catch (DataAccessException ex) {
+            metrics.redisDegraded();
             log.debug("redis marker arm failed for order {}", orderId, ex);
         }
     }
@@ -64,6 +69,7 @@ public class GrabMarker {
                 default -> Decision.MISSING;
             };
         } catch (DataAccessException ex) {
+            metrics.redisDegraded();
             log.debug("redis marker filter unavailable for order {}", orderId);
             return Decision.UNAVAILABLE;
         }
@@ -79,6 +85,7 @@ public class GrabMarker {
             redis.execute(rearmScript, List.of(markerKey(orderId), knownKey(orderId)), String.valueOf(toMillis(deadline)),
                     String.valueOf(seconds), String.valueOf(publisherId));
         } catch (DataAccessException ex) {
+            metrics.redisDegraded();
             log.debug("redis marker rearm failed for order {}", orderId, ex);
         }
     }
@@ -87,6 +94,7 @@ public class GrabMarker {
         try {
             removeStrict(orderId);
         } catch (DataAccessException ex) {
+            metrics.redisDegraded();
             log.debug("redis marker removal failed for order {}", orderId, ex);
         }
     }
