@@ -1,0 +1,46 @@
+{
+  "annotations": {"list": []},
+  "editable": true,
+  "graphTooltip": 0,
+  "panels": [
+    {
+      "title": "Grab Throughput",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+      "targets": [
+        {"expr": "rate(grab_attempt_total[1m])", "legendFormat": "attempts"},
+        {"expr": "rate(grab_winner_total[1m])", "legendFormat": "winners"},
+        {"expr": "rate(grab_redis_filtered_total[1m])", "legendFormat": "redis filtered"}
+      ]
+    },
+    {
+      "title": "Outbox Backlog",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+      "targets": [
+        {"expr": "outbox_pending", "legendFormat": "pending"},
+        {"expr": "outbox_dead", "legendFormat": "dead"}
+      ]
+    },
+    {
+      "title": "Redis Filter Effectiveness",
+      "type": "stat",
+      "gridPos": {"h": 6, "w": 12, "x": 0, "y": 8},
+      "targets": [
+        {"expr": "100 * rate(grab_redis_filtered_total[5m]) / clamp_min(rate(grab_attempt_total[5m]), 1)", "legendFormat": "filter rate"}
+      ]
+    },
+    {
+      "title": "Settlement Retries",
+      "type": "timeseries",
+      "gridPos": {"h": 6, "w": 12, "x": 12, "y": 8},
+      "targets": [
+        {"expr": "rate(settlement_retry_total[5m])", "legendFormat": "retries"},
+        {"expr": "rate(recon_failure_total[5m])", "legendFormat": "recon failures"}
+      ]
+    }
+  ],
+  "schemaVersion": 39,
+  "title": "Campus Errand Reliability",
+  "version": 1
+}
