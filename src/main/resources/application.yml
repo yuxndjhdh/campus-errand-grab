@@ -1,0 +1,65 @@
+server:
+  port: 8080
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      group:
+        readiness:
+          include: db
+        liveness:
+          include: livenessState
+
+spring:
+  application:
+    name: campus-errand-grab
+
+  datasource:
+    url: ${DB_URL:jdbc:mysql://127.0.0.1:3306/campus_errand?createDatabaseIfNotExist=true&useSSL=false&serverTimezone=Asia/Shanghai&rewriteBatchedStatements=true&allowPublicKeyRetrieval=true}
+    username: ${DB_USERNAME:root}
+    password: ${DB_PASSWORD:}
+    hikari:
+      maximum-pool-size: 20
+      pool-name: errand-pool
+
+  flyway:
+    enabled: true
+    baseline-on-migrate: true
+
+  data:
+    redis:
+      host: ${REDIS_HOST:127.0.0.1}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      timeout: ${REDIS_TIMEOUT:200ms}
+
+  task:
+    scheduling:
+      pool:
+        size: 4
+
+app:
+  grab:
+    # Flip to false to measure the same correctness with N x more DB writes.
+    redis-prefilter-enabled: true
+    marker-ttl-slack-seconds: 30
+  order:
+    claim-ttl-seconds: 300
+    deliver-ttl-seconds: 3600
+  commission:
+    rate: 0.10
+    platform-user-id: 2
+  recon:
+    interval-ms: 60000
+  security:
+    jwt-secret: ${JWT_SECRET:local-development-secret-change-me}
+    access-token-ttl-seconds: ${JWT_ACCESS_TOKEN_TTL_SECONDS:900}
+  admin:
+    username: ${ADMIN_USERNAME:}
+    password: ${ADMIN_PASSWORD:}

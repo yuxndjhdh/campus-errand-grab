@@ -1,0 +1,23 @@
+server:
+  port: 0
+
+spring:
+  datasource:
+    url: ${DB_URL:jdbc:mysql://127.0.0.1:3306/campus_errand_test?createDatabaseIfNotExist=true&useSSL=false&serverTimezone=Asia/Shanghai&rewriteBatchedStatements=true&allowPublicKeyRetrieval=true}
+    username: ${DB_USERNAME:root}
+    password: ${DB_PASSWORD:}
+    hikari:
+      maximum-pool-size: 30
+      pool-name: errand-test-pool
+  flyway:
+    clean-disabled: false
+  task:
+    scheduling:
+      pool:
+        size: 1
+
+app:
+  grab:
+    redis-prefilter-enabled: true
+  recon:
+    interval-ms: 3600000

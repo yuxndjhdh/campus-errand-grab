@@ -1,0 +1,11 @@
+target/
+.idea/
+.vscode/
+*.iml
+*.log
+.env
+reports/*.json
+__pycache__/
+.pytest_cache/
+*.pyc
+*.tmp
