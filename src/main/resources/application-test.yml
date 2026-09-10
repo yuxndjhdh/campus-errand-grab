@@ -21,3 +21,6 @@ app:
     redis-prefilter-enabled: true
   recon:
     interval-ms: 3600000
+  outbox:
+    poll-delay-ms: 600000
+    initial-delay-ms: 600000

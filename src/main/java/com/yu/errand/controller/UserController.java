@@ -1,9 +1,7 @@
 package com.yu.errand.controller;
 
 import com.yu.errand.common.ApiResponse;
-import com.yu.errand.controller.dto.CreateUserRequest;
 import com.yu.errand.controller.dto.RechargeRequest;
-import com.yu.errand.controller.dto.UserView;
 import com.yu.errand.controller.dto.WalletView;
 import com.yu.errand.service.UserService;
 import com.yu.errand.security.CurrentUserService;
@@ -24,11 +22,6 @@ public class UserController {
     public UserController(UserService users, CurrentUserService currentUser) {
         this.users = users;
         this.currentUser = currentUser;
-    }
-
-    @PostMapping
-    public ApiResponse<UserView> create(@Valid @RequestBody CreateUserRequest request) {
-        return ApiResponse.ok(users.create(request.nickname()));
     }
 
     @PostMapping("/{id}/recharge")

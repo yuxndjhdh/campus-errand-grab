@@ -5,13 +5,11 @@ import com.yu.errand.domain.model.ErrandOrder;
 import com.yu.errand.domain.model.OutboxEvent;
 import com.yu.errand.redis.DelayQueue;
 import com.yu.errand.redis.GrabMarker;
-import com.yu.errand.repository.OutboxRepository;
 import com.yu.errand.service.OrderService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
-import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Duration;
 import java.time.LocalDateTime;
@@ -21,34 +19,36 @@ import java.util.List;
 public class OutboxWorker {
     private static final Logger log = LoggerFactory.getLogger(OutboxWorker.class);
     private static final int MAX_RETRIES = 12;
-    private final OutboxRepository outbox;
+    private final OutboxClaimService claimService;
+    private final OutboxStateService stateService;
     private final OrderService orders;
     private final GrabMarker marker;
     private final DelayQueue delayQueue;
 
-    public OutboxWorker(OutboxRepository outbox, OrderService orders, GrabMarker marker, DelayQueue delayQueue) {
-        this.outbox = outbox;
+    public OutboxWorker(OutboxClaimService claimService, OutboxStateService stateService,
+                        OrderService orders, GrabMarker marker, DelayQueue delayQueue) {
+        this.claimService = claimService;
+        this.stateService = stateService;
         this.orders = orders;
         this.marker = marker;
         this.delayQueue = delayQueue;
     }
 
-    @Transactional
-    @Scheduled(fixedDelayString = "${app.outbox.poll-delay-ms:500}", initialDelay = 1000)
+    @Scheduled(fixedDelayString = "${app.outbox.poll-delay-ms:500}", initialDelayString = "${app.outbox.initial-delay-ms:1000}")
     public void publish() {
         List<OutboxEvent> events = claimBatch();
         for (OutboxEvent event : events) {
             try {
                 publish(event);
-                outbox.markPublished(event.id());
+                stateService.markPublished(event);
             } catch (RuntimeException ex) {
                 int retry = event.retryCount() + 1;
                 if (retry >= MAX_RETRIES) {
-                    outbox.markDead(event.id(), retry, ex.toString());
+                    stateService.markDead(event, retry, ex.toString());
                     log.error("outbox event moved to DEAD eventId={} type={} bizId={} retries={}",
                             event.id(), event.eventType(), event.bizId(), retry, ex);
                 } else {
-                    outbox.markRetry(event.id(), retry, LocalDateTime.now().plus(backoff(retry)), ex.toString());
+                    stateService.markRetry(event, retry, LocalDateTime.now().plus(backoff(retry)), ex.toString());
                     log.warn("outbox event failed eventId={} type={} bizId={} retry={}",
                             event.id(), event.eventType(), event.bizId(), retry, ex);
                 }
@@ -56,9 +56,9 @@ public class OutboxWorker {
         }
     }
 
-    protected List<OutboxEvent> claimBatch() {
+    List<OutboxEvent> claimBatch() {
         LocalDateTime now = LocalDateTime.now();
-        return outbox.claimBatch(50, now, now.plusSeconds(30));
+        return claimService.claimBatch(50, now, now.plusSeconds(30));
     }
 
     private void publish(OutboxEvent event) {

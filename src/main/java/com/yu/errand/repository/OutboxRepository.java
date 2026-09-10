@@ -6,7 +6,6 @@ import org.springframework.stereotype.Repository;
 
 import java.sql.Timestamp;
 import java.time.LocalDateTime;
-import java.util.ArrayList;
 import java.util.List;
 
 @Repository
@@ -21,6 +20,7 @@ public class OutboxRepository {
     }
 
     public List<OutboxEvent> claimBatch(int limit, LocalDateTime now, LocalDateTime lockUntil) {
+        LocalDateTime normalizedLockUntil = truncateToMillis(lockUntil);
         List<OutboxEvent> events = jdbc.query(
                 "SELECT id,event_type,biz_id,payload_json,status,retry_count,next_retry_at,locked_until,last_error,created_at " +
                         "FROM t_outbox_event WHERE ((status IN ('PENDING','RETRY') AND next_retry_at<=?) " +
@@ -29,23 +29,29 @@ public class OutboxRepository {
         if (events.isEmpty()) return events;
         for (OutboxEvent event : events) {
             jdbc.update("UPDATE t_outbox_event SET status='PROCESSING',locked_until=? WHERE id=?",
-                    Timestamp.valueOf(lockUntil), event.id());
+                    Timestamp.valueOf(normalizedLockUntil), event.id());
         }
-        return events;
+        return events.stream()
+                .map(event -> new OutboxEvent(event.id(), event.eventType(), event.bizId(), event.payloadJson(),
+                        "PROCESSING", event.retryCount(), event.nextRetryAt(), normalizedLockUntil, event.lastError(), event.createdAt()))
+                .toList();
     }
 
-    public int markPublished(long id) {
-        return jdbc.update("UPDATE t_outbox_event SET status='PUBLISHED',published_at=NOW(3),locked_until=NULL,last_error=NULL WHERE id=?", id);
+    public int markPublished(long id, LocalDateTime leaseUntil) {
+        return jdbc.update("UPDATE t_outbox_event SET status='PUBLISHED',published_at=NOW(3),locked_until=NULL,last_error=NULL " +
+                "WHERE id=? AND status='PROCESSING' AND locked_until=?", id, Timestamp.valueOf(leaseUntil));
     }
 
-    public int markRetry(long id, int retryCount, LocalDateTime nextRetryAt, String error) {
-        return jdbc.update("UPDATE t_outbox_event SET status='RETRY',retry_count=?,next_retry_at=?,locked_until=NULL,last_error=? WHERE id=?",
-                retryCount, Timestamp.valueOf(nextRetryAt), truncate(error), id);
+    public int markRetry(long id, LocalDateTime leaseUntil, int retryCount, LocalDateTime nextRetryAt, String error) {
+        return jdbc.update("UPDATE t_outbox_event SET status='RETRY',retry_count=?,next_retry_at=?,locked_until=NULL,last_error=? " +
+                        "WHERE id=? AND status='PROCESSING' AND locked_until=?",
+                retryCount, Timestamp.valueOf(nextRetryAt), truncate(error), id, Timestamp.valueOf(leaseUntil));
     }
 
-    public int markDead(long id, int retryCount, String error) {
-        return jdbc.update("UPDATE t_outbox_event SET status='DEAD',retry_count=?,locked_until=NULL,last_error=? WHERE id=?",
-                retryCount, truncate(error), id);
+    public int markDead(long id, LocalDateTime leaseUntil, int retryCount, String error) {
+        return jdbc.update("UPDATE t_outbox_event SET status='DEAD',retry_count=?,locked_until=NULL,last_error=? " +
+                        "WHERE id=? AND status='PROCESSING' AND locked_until=?",
+                retryCount, truncate(error), id, Timestamp.valueOf(leaseUntil));
     }
 
     public long countByStatus(String status) {
@@ -71,6 +77,10 @@ public class OutboxRepository {
 
     private static LocalDateTime dt(Timestamp timestamp) {
         return timestamp == null ? null : timestamp.toLocalDateTime();
+    }
+
+    private static LocalDateTime truncateToMillis(LocalDateTime value) {
+        return value.withNano((value.getNano() / 1_000_000) * 1_000_000);
     }
 
     private static String truncate(String value) {
