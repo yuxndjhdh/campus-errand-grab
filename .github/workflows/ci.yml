@@ -20,6 +20,8 @@ jobs:
           cache: maven
       - name: Verify
         run: mvn -B -s mvn-settings.xml verify
+      - name: Repository safety scan
+        run: python scripts/validate_repository_safety.py
       - name: Validate compose file
         run: docker compose config
       - name: Build image
