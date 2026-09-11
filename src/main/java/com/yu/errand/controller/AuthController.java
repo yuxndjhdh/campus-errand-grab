@@ -8,6 +8,7 @@ import com.yu.errand.controller.dto.UserView;
 import com.yu.errand.service.AuthService;
 import com.yu.errand.service.UserService;
 import jakarta.validation.Valid;
+import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -30,7 +31,7 @@ public class AuthController {
     }
 
     @PostMapping("/login")
-    public ApiResponse<TokenView> login(@Valid @RequestBody LoginRequest request) {
-        return ApiResponse.ok(auth.login(request.username(), request.password()));
+    public ApiResponse<TokenView> login(@Valid @RequestBody LoginRequest request, HttpServletRequest httpRequest) {
+        return ApiResponse.ok(auth.login(request.username(), request.password(), httpRequest.getRemoteAddr()));
     }
 }

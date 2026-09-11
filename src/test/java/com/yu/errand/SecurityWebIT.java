@@ -155,6 +155,41 @@ class SecurityWebIT extends IntegrationTestBase {
                 .andExpect(status().isOk());
     }
 
+    @Test
+    void repeatedInvalidLoginsAreRateLimited() throws Exception {
+        String username = "rate-limited-login";
+        register(username, "rate-limit-password");
+        for (int attempt = 0; attempt < 5; attempt++) {
+            mockMvc.perform(post("/api/auth/login")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(objectMapper.writeValueAsString(Map.of(
+                                    "username", username,
+                                    "password", "wrong-password"))))
+                    .andExpect(status().isUnauthorized());
+        }
+        mockMvc.perform(post("/api/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of(
+                                "username", username,
+                                "password", "wrong-password"))))
+                .andExpect(status().isTooManyRequests());
+    }
+
+    @Test
+    void successfulLoginsDoNotConsumeFailureIpBudget() throws Exception {
+        int previousLimit = properties.getSecurity().getLoginIpFailureLimit();
+        properties.getSecurity().setLoginIpFailureLimit(2);
+        try {
+            for (int index = 0; index < 3; index++) {
+                String username = "successful-login-" + index;
+                register(username, "successful-login-password");
+                login(username, "successful-login-password");
+            }
+        } finally {
+            properties.getSecurity().setLoginIpFailureLimit(previousLimit);
+        }
+    }
+
     private String register(String username, String password) throws Exception {
         MvcResult result = mockMvc.perform(post("/api/auth/register")
                         .contentType(MediaType.APPLICATION_JSON)

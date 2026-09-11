@@ -78,17 +78,26 @@ public class GrabProperties {
 
     public static class Security {
         private String jwtSecret = "local-development-secret-change-me";
+        private String previousJwtSecret = "";
         private long accessTokenTtlSeconds = 900;
-        private int userGrabRateLimit = 30;
-        private int userGrabRateWindowSeconds = 10;
+        private boolean requireRedisPassword = false;
+        private int loginFailureLimit = 5;
+        private int loginIpFailureLimit = 30;
+        private int loginWindowSeconds = 60;
         public String getJwtSecret() { return jwtSecret; }
         public void setJwtSecret(String value) { jwtSecret = value; }
+        public String getPreviousJwtSecret() { return previousJwtSecret; }
+        public void setPreviousJwtSecret(String value) { previousJwtSecret = value; }
         public long getAccessTokenTtlSeconds() { return accessTokenTtlSeconds; }
         public void setAccessTokenTtlSeconds(long value) { accessTokenTtlSeconds = value; }
-        public int getUserGrabRateLimit() { return userGrabRateLimit; }
-        public void setUserGrabRateLimit(int value) { userGrabRateLimit = value; }
-        public int getUserGrabRateWindowSeconds() { return userGrabRateWindowSeconds; }
-        public void setUserGrabRateWindowSeconds(int value) { userGrabRateWindowSeconds = value; }
+        public boolean isRequireRedisPassword() { return requireRedisPassword; }
+        public void setRequireRedisPassword(boolean value) { requireRedisPassword = value; }
+        public int getLoginFailureLimit() { return loginFailureLimit; }
+        public void setLoginFailureLimit(int value) { loginFailureLimit = value; }
+        public int getLoginIpFailureLimit() { return loginIpFailureLimit; }
+        public void setLoginIpFailureLimit(int value) { loginIpFailureLimit = value; }
+        public int getLoginWindowSeconds() { return loginWindowSeconds; }
+        public void setLoginWindowSeconds(int value) { loginWindowSeconds = value; }
     }
 
     public static class Admin {

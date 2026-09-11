@@ -1,0 +1,16 @@
+server:
+  port: 8080
+
+# Keep management traffic on the private service network. The reverse proxy only
+# publishes server.port; Prometheus must scrape this internal port explicitly.
+management:
+  server:
+    port: 8081
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+
+app:
+  security:
+    require-redis-password: true

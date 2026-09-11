@@ -1,7 +1,13 @@
 server:
   port: 8080
 
+logging:
+  pattern:
+    console: "%d{yyyy-MM-dd'T'HH:mm:ss.SSSXXX} %-5level [%X{traceId:-}] %logger{36} - %msg%n"
+
 management:
+  server:
+    port: ${MANAGEMENT_PORT:8080}
   endpoints:
     web:
       exposure:
@@ -63,7 +69,12 @@ app:
     interval-ms: 60000
   security:
     jwt-secret: ${JWT_SECRET:local-development-secret-change-me}
+    previous-jwt-secret: ${JWT_PREVIOUS_SECRET:}
     access-token-ttl-seconds: ${JWT_ACCESS_TOKEN_TTL_SECONDS:900}
+    require-redis-password: ${REQUIRE_REDIS_PASSWORD:false}
+    login-failure-limit: ${LOGIN_FAILURE_LIMIT:5}
+    login-ip-failure-limit: ${LOGIN_IP_FAILURE_LIMIT:30}
+    login-window-seconds: ${LOGIN_WINDOW_SECONDS:60}
   admin:
     username: ${ADMIN_USERNAME:}
     password: ${ADMIN_PASSWORD:}
