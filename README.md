@@ -19,6 +19,12 @@ docker compose up --build
 bash scripts/smoke_curl.sh
 ```
 
+Python 冒烟、故障脚本和基准执行器依赖 `requests` 与 `PyMySQL`：
+
+```bash
+python -m pip install -r requirements.txt
+```
+
 Compose 会等待 MySQL 和 Redis 健康后启动应用，Flyway 自动迁移数据库。应用健康检查：
 
 ```text
@@ -60,6 +66,21 @@ python scripts/load_test.py --phase mixed --orders 100 --clients-per-order 20
 k6 run load/k6.js
 ```
 
-压测脚本会把原始 JSON 保存到 `reports/`，其中的性能数字只应来自实际运行结果。正式报告应同时记录 P50/P95/P99、错误类型、Redis 过滤率、DB CAS 数、连接池、Redis 故障窗口和对账结果；项目不在 README 中预填估算值。
+正式 HTTP 基准可使用重复执行器；它要求显式的 disposable test environment，默认每个变体预热一次并正式运行五次。当前验收使用 200 个轮换身份、200 个工作线程、Hikari 连接池 20、关闭限流、抢单 TTL 3600 秒：
+
+```bash
+python scripts/collect_benchmark_environment.py --formal-status COMPLETE --runs 5 --warmup-runs 1 --prefilter-modes on,off --pool-sizes 20 --takers 200 --workers 200 --claim-ttl-seconds 3600 --rate-limit-enabled false
+python scripts/run_benchmarks.py --test-environment --scenario all --runs 5 --warmup-runs 1 --prefilter-modes on,off --pool-sizes 20 --takers 200 --workers 200
+python scripts/load_test.py --phase sustained --duration-seconds 300 --clients-per-order 20 --takers 200 --workers 200 --output reports/benchmarks/raw/sustained-300s-on-pool20.json
+python scripts/benchmark_redis_fault.py --test-environment --clients 200 --output reports/benchmarks/raw/redis-fault-200-on-pool20.json
+python scripts/benchmark_settlement_retry.py --test-environment --output reports/benchmarks/raw/settlement-retry-pool20.json
+python scripts/generate_benchmark_report.py
+```
+
+`--takers` 是轮换使用的认证身份数量。若要避免每用户限流影响抢单基线，应按并发规模提供足够身份，或在报告中明确记录限流结果。执行器把每轮 JSON 和索引写入 `reports/benchmarks/raw/`；正式持续负载、Redis 故障和结算重试证据也写入该目录。正式结果、图表和环境参数见 [reports/benchmarks/benchmark-report.md](reports/benchmarks/benchmark-report.md)。
+
+故障演示入口和断言见 [docs/failure-recovery.md](docs/failure-recovery.md)。四个脚本的结果写入 `reports/failure-tests/`，失败返回非零退出码，成功报告索引见 [reports/failure-tests/index.md](reports/failure-tests/index.md)。Prometheus 告警规则位于 `ops/prometheus/alerts.yml`，Grafana dashboard 位于 `ops/grafana/dashboards/campus-errand.json`；监控验证和脱敏指标快照见 [reports/monitoring/monitoring-validation.json](reports/monitoring/monitoring-validation.json)。
+
+压测脚本会把原始 JSON 保存到 `reports/` 或 `reports/benchmarks/raw/`，其中的性能数字只来自实际运行结果。当前本地正式报告状态为 `COMPLETE`：10 个热点/多订单变体各完成 1 次预热和 5 次正式运行，并补充了 300 秒持续负载、Redis 故障和结算重试证据。结果适用范围、异常样本和原始文件索引见 [reports/benchmarks/benchmark-report.md](reports/benchmarks/benchmark-report.md)；这些数字不表示系统的普遍容量上限。
 
 设计细节见 [docs/design.md](docs/design.md)，故障注入流程见 [docs/failure-recovery.md](docs/failure-recovery.md)，面试说明见 [docs/interview-notes.md](docs/interview-notes.md)。

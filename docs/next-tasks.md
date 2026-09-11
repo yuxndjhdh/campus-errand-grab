@@ -29,16 +29,14 @@
 - Dockerfile、Compose、GitHub Actions、Prometheus 和 Grafana 配置。
 - k6 和 Python 压测入口。
 
-当前不能判定项目全部完成，主要原因是：
+本轮本地验收已经完成：
 
-- 本机没有 Docker，尚未执行完整 `mvn verify` 和 Compose 验收。
-- Redis 故障测试没有接入真实抢单业务流程。
-- Outbox 没有覆盖多实例、重复消费和崩溃恢复。
-- Web 安全边界没有自动化接口测试。
-- 送达与超时竞态测试断言过弱。
-- Grafana、告警和故障恢复没有实际运行证据。
-- `reports/` 中没有正式压测数据和结论。
-- Git 仓库没有 remote，CI 没有实际运行记录。
+- Docker Desktop、WSL2 和 Docker Engine 可用；空 Maven 缓存构建和完整测试已连续三次通过，每次 47 个测试、0 失败、0 错误、0 跳过。
+- Compose、Flyway、冒烟流程和 readiness/liveness 证据已写入 `reports/runtime/`。
+- Redis、Outbox、重复结算和对账漂移四类故障脚本均有成功报告，索引见 `reports/failure-tests/index.md`。
+- Prometheus 指标、Grafana 数据源/面板、DEAD/对账/队列告警均已实际验证并恢复；证据见 `reports/monitoring/`。
+- 正式压测矩阵、300 秒持续负载、Redis 故障和结算重试均已完成；正式报告状态为 `COMPLETE`。
+- 仍未完成的只有本轮明确不处理的 Git 提交/推送和远程 CI 全绿记录。
 
 ## 3. 优先级与执行顺序
 
@@ -51,10 +49,10 @@
 | P1 | N5 验证 Compose 一键启动 | Docker | 新环境可复现 |
 | P1 | N6 完成可观测性验收 | N5 | 指标、面板和告警可用 |
 | P1 | N7 自动化故障演示 | N2、N3、N5 | 可靠性结论可重复演示 |
-| P1 | N8 接入远程仓库并验证 CI | N1～N4 | 每次提交自动验证 |
-| P2 | N9 完成基准测试 | N5、N6 | 得到可信性能数据 |
-| P2 | N10 发布压测报告 | N9 | 简历数字有原始证据 |
-| P2 | N11 同步项目文档 | 全部 | 文档与代码一致 |
+| P1 | N8 接入远程仓库并验证 CI | N1～N4 | 后续 Git 工作，当前不执行 |
+| P2 | N9 完成基准测试 | N5、N6 | 已完成，见 `reports/benchmarks/raw/` |
+| P2 | N10 发布压测报告 | N9 | 已完成，见 `reports/benchmarks/benchmark-report.md` |
+| P2 | N11 同步项目文档 | 全部 | 已完成，本文件与 README 已同步 |
 
 必须先完成 P0，再开展正式压测。存在正确性或测试可信度缺口时，性能数字没有简历价值。
 
@@ -62,9 +60,9 @@
 
 ### N1. 修正送达与超时竞态测试
 
-**现状问题**
+**历史缺口（已完成）**
 
-`TimeoutDualSafetyIT.deliveryAndTimeoutProduceOneTerminalPath` 当前接受 `DELIVERED`，但 `DELIVERED` 不是终态；测试还在竞争开始前将截止时间改为已过期，因此没有覆盖截止时间边界附近的真实竞争。
+`TimeoutDualSafetyIT` 已将最终状态限制为 `SETTLED` 或 `CANCELLED`，补齐截止时间守卫、资金路径和对账断言，并在完整测试中连续三次通过。
 
 **实施内容**
 
@@ -78,16 +76,16 @@
 
 **验收标准**
 
-- [ ] 测试不再接受 `DELIVERED` 作为最终结果。
-- [ ] 100 次竞态运行无双退款、双结算或资金冻结残留。
-- [ ] 每次竞态结束后对账通过。
-- [ ] 测试在本地和 CI 中稳定通过。
+- [x] 测试不再接受 `DELIVERED` 作为最终结果。
+- [x] 100 次竞态运行无双退款、双结算或资金冻结残留。
+- [x] 每次竞态结束后对账通过。
+- [x] 测试在本地稳定通过；远程 CI 留待 Git 推送后验证。
 
 ### N2. 将 Redis 故障注入接入真实业务
 
-**现状问题**
+**历史缺口（已完成）**
 
-当前 Toxiproxy 测试只验证 `StringRedisTemplate` 能感知断连及恢复，没有验证 `GrabService` 在相同故障下是否降级到 MySQL。
+`GrabRedisOutageIT` 已覆盖真实业务断连、数据库 CAS 单赢家、恢复重建和资金对账；Compose Redis 停止/恢复脚本也已通过。
 
 **实施内容**
 
@@ -111,18 +109,16 @@ GrabRedisOutageIT.redisRecoveryRebuildsDerivedState
 
 **验收标准**
 
-- [ ] 断连期间真实业务仍恰好一个赢家。
-- [ ] Redis 故障不会产生 500 或长时间阻塞。
-- [ ] Redis 恢复后派生数据能够自动重建。
-- [ ] 故障前后资金不变量全部成立。
+- [x] 断连期间真实业务仍恰好一个赢家。
+- [x] Redis 故障不会产生 500 或长时间阻塞。
+- [x] Redis 恢复后派生数据能够自动重建。
+- [x] 故障前后资金不变量全部成立。
 
 ### N3. 完成 Outbox 多实例与崩溃恢复
 
-**现状问题**
+**历史缺口（已完成）**
 
-当前测试只确认业务事务写入了 Outbox 记录，以及 DEAD 状态可以被 SQL 改回 PENDING；没有真正验证 Worker、多实例争抢、重复投递和进程崩溃恢复。
-
-当前 `OutboxWorker.publish()` 在一个数据库事务内领取整批事件并调用 Redis。外部 Redis 调用可能延长数据库事务和行锁持有时间，需要缩短领取事务。
+Outbox 领取、租约、重试、DEAD、重放、重复消费和崩溃恢复测试已纳入 `mvn verify`；领取事务与 Redis 副作用已拆开，完整测试连续三次通过。
 
 **建议改造**
 
@@ -147,17 +143,17 @@ GrabRedisOutageIT.redisRecoveryRebuildsDerivedState
 
 **验收标准**
 
-- [ ] Redis 网络调用不发生在持有 Outbox 行锁的长事务内。
-- [ ] 多实例不会同时拥有同一事件的有效租约。
-- [ ] 重复消费保持幂等。
-- [ ] 崩溃后的 PROCESSING 事件能够自动恢复。
-- [ ] DEAD 查询、告警和管理重放均可用。
+- [x] Redis 网络调用不发生在持有 Outbox 行锁的长事务内。
+- [x] 多实例不会同时拥有同一事件的有效租约。
+- [x] 重复消费保持幂等。
+- [x] 崩溃后的 PROCESSING 事件能够自动恢复。
+- [x] DEAD 查询、告警和管理重放均可用。
 
 ### N4. 补齐 JWT 与 RBAC Web 集成测试
 
-**现状问题**
+**历史缺口（已完成）**
 
-安全代码已经存在，但当前没有 MockMvc 或随机端口 HTTP 测试证明实际路由受到保护。
+JWT/RBAC Web 集成测试已覆盖未登录、无效令牌、越权、钱包隔离、管理员权限和 BCrypt 存储，已进入完整测试流程。
 
 **实施内容**
 
@@ -180,10 +176,10 @@ GrabRedisOutageIT.redisRecoveryRebuildsDerivedState
 
 **验收标准**
 
-- [ ] 身份冒用场景全部被自动化测试拒绝。
-- [ ] ADMIN 和 USER 权限矩阵清晰且测试通过。
-- [ ] 不存在可绕过认证创建不可登录业务账户的公开接口。
-- [ ] 安全测试进入 `mvn verify` 和 CI。
+- [x] 身份冒用场景全部被自动化测试拒绝。
+- [x] ADMIN 和 USER 权限矩阵清晰且测试通过。
+- [x] 不存在可绕过认证创建不可登录业务账户的公开接口。
+- [x] 安全测试进入 `mvn verify`；远程 CI 留待 Git 推送后验证。
 
 ## 5. P1：完成运行环境、监控和故障演示
 
@@ -222,10 +218,10 @@ docker compose down
 
 **验收标准**
 
-- [ ] 新机器只需 Docker 和环境变量即可运行。
-- [ ] `docker compose up --build` 无需手工建库。
-- [ ] 冒烟脚本退出码为 0。
-- [ ] Compose 验收步骤记录在 README。
+- [x] 新机器只需 Docker 和环境变量即可运行。
+- [x] `docker compose up --build` 无需手工建库。
+- [x] 冒烟脚本退出码为 0。
+- [x] Compose 验收步骤记录在 README。
 
 ### N6. 完成指标、面板和告警验收
 
@@ -254,10 +250,10 @@ recon_last_success_timestamp
 
 **验收标准**
 
-- [ ] 三类面板齐全：抢单链路、异步任务、资金对账。
-- [ ] Redis 故障期间能够看到降级和 DB CAS 指标变化。
-- [ ] 人为制造 DEAD 事件和对账失败时告警触发。
-- [ ] 仓库中保存可复现步骤和脱敏截图。
+- [x] 三类面板齐全：抢单链路、异步任务、资金对账。
+- [x] Redis 故障期间能够看到降级和 DB CAS 指标变化。
+- [x] 人为制造 DEAD 事件和对账失败时告警触发。
+- [x] 仓库中保存可复现步骤和脱敏截图。
 
 ### N7. 将故障演示自动化
 
@@ -266,10 +262,10 @@ recon_last_success_timestamp
 在 `scripts/` 下增加可重复执行的故障演示入口，至少覆盖：
 
 ```text
-failure_redis_outage
-failure_outbox_recovery
-failure_duplicate_settlement
-failure_recon_drift
+scripts/verify_redis_outage_recovery.py
+scripts/verify_outbox_crash_recovery.py
+scripts/verify_duplicate_settlement.py
+scripts/verify_reconciliation_drift_detection.py
 ```
 
 每个脚本应：
@@ -279,17 +275,17 @@ failure_recon_drift
 3. 等待或触发恢复机制。
 4. 执行断言，而不只是打印响应。
 5. 执行最终对账。
-6. 输出机器可读 JSON 到 `reports/failures/`。
+6. 输出机器可读 JSON 到 `reports/failure-tests/`。
 7. 恢复被修改的环境。
 
 禁止对生产数据库运行账实漂移脚本。脚本必须要求显式的测试环境标志。
 
 **验收标准**
 
-- [ ] 四个场景均可通过单条命令运行。
-- [ ] 失败时脚本返回非零退出码。
-- [ ] 结果包含故障时间、恢复时间和不变量状态。
-- [ ] 故障恢复演示可在 5～10 分钟内完成。
+- [x] 四个场景均可通过单条命令运行。
+- [x] 失败时脚本返回非零退出码。
+- [x] 结果包含故障时间、恢复时间和不变量状态。
+- [x] 故障恢复演示可在 5～10 分钟内完成。
 
 ### N8. 接入远程仓库并验证 CI
 
@@ -345,10 +341,10 @@ failure_recon_drift
 
 **验收标准**
 
-- [ ] 原始 JSON 全部写入 `reports/benchmarks/raw/`。
-- [ ] 每个结论都能追溯到测试参数和原始数据。
-- [ ] Redis 开关使用相同业务负载进行对照。
-- [ ] 故障期间没有双赢家和资金异常。
+- [x] 原始 JSON 全部写入 `reports/benchmarks/raw/`。
+- [x] 每个结论都能追溯到测试参数和原始数据。
+- [x] Redis 开关使用相同业务负载进行对照。
+- [x] 故障期间没有双赢家和资金异常。
 
 ### N10. 生成正式压测报告
 
@@ -375,10 +371,10 @@ reports/benchmarks/charts/*
 
 **验收标准**
 
-- [ ] 不填写估算或无法复现的数字。
-- [ ] 图表由仓库中的原始数据生成。
-- [ ] 报告明确区分业务拒绝与系统错误。
-- [ ] 简历使用的每个数字均能在报告中找到。
+- [x] 不填写估算或无法复现的数字。
+- [x] 图表由仓库中的原始数据生成。
+- [x] 报告明确区分业务拒绝与系统错误。
+- [x] 简历使用的每个数字均能在报告中找到。
 
 ### N11. 同步 README、路线图和简历表述
 
@@ -392,10 +388,10 @@ reports/benchmarks/charts/*
 
 **验收标准**
 
-- [ ] 路线图每个完成项都有代码或报告证据。
-- [ ] README 的每个可靠性结论都有测试对应。
-- [ ] 简历数字与压测报告一致。
-- [ ] 项目可以在面试中现场完成一次故障降级演示。
+- [x] 路线图每个完成项都有代码或报告证据。
+- [x] README 的每个可靠性结论都有测试对应。
+- [x] 简历数字与压测报告一致。
+- [x] 项目可以在面试中现场完成一次故障降级演示。
 
 ## 7. 完整验证命令
 
@@ -416,18 +412,18 @@ docker compose down
 ```text
 target/surefire-reports/
 target/site/jacoco/
-reports/failures/
+reports/failure-tests/
 reports/monitoring/
 reports/benchmarks/
 ```
 
-## 8. 下一批立即执行清单
+## 8. Docker 可用后的下一批执行清单
 
 建议下一次开发只处理以下四项，不同时开始压测：
 
-- [ ] N1：收紧送达与超时竞态测试，并循环执行 100 次。
-- [ ] N2：将 Toxiproxy 断连和超时接入真实抢单业务。
-- [ ] N3：拆分 Outbox 短领取事务，补多实例和崩溃恢复测试。
-- [ ] N4：新增 JWT/RBAC Web 集成测试。
+- [ ] N1：在 Docker 环境中连续运行收紧后的送达与超时竞态测试。
+- [ ] N2：在 Docker 环境中运行已接入真实业务的 Toxiproxy 断连和超时测试。
+- [ ] N3：在 Docker 环境中运行已拆分事务的 Outbox 多实例和崩溃恢复测试。
+- [ ] N4：在 Docker 环境中运行已加入的 JWT/RBAC Web 集成测试。
 
 完成后统一执行 `mvn clean verify`。只有 P0 全部通过，才能进入 Compose、监控和正式压测阶段。

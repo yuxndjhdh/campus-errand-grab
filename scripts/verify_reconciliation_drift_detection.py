@@ -16,6 +16,7 @@ from failure_common import (
     register_and_login,
     require_test_environment,
     run_scenario,
+    utc_now,
 )
 
 
@@ -40,7 +41,9 @@ def main() -> int:
                     "UPDATE t_account SET balance_cents=balance_cents+1 WHERE user_id=%s AND account_type='AVAILABLE'",
                     (user_id,),
                 )
+            drift_at = utc_now()
             detected = recon(session, args.base, admin_token(session, args.base))
+            detected_at = utc_now()
             invariant = detected["invariants"]["INV-2-materialized-balances-match-ledger"]
             if detected.get("passed") or invariant is not False:
                 raise AssertionError(f"reconciliation did not identify INV-2 drift: {detected}")
@@ -54,9 +57,18 @@ def main() -> int:
             connection.close()
 
         restored = recon(session, args.base, admin_token(session, args.base))
+        restored_at = utc_now()
         if not restored.get("passed"):
             raise AssertionError(f"reconciliation did not pass after restoring drift: {restored}")
-        return {"userId": user_id, "driftDetected": True, "restored": True, "reconciliation": restored}
+        return {
+            "userId": user_id,
+            "driftDetected": True,
+            "restored": True,
+            "driftInjectedAt": drift_at,
+            "detectedAt": detected_at,
+            "restoredAt": restored_at,
+            "reconciliation": restored,
+        }
 
     return run_scenario("reconciliation-drift", scenario)
 

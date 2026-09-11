@@ -2,7 +2,7 @@ services:
   mysql:
     image: mysql:8.4
     environment:
-      MYSQL_DATABASE: campus_errand
+      MYSQL_DATABASE: ${DB_NAME:-campus_errand}
       MYSQL_ROOT_PASSWORD: ${DB_PASSWORD:-change-me}
     ports:
       - "${MYSQL_PORT:-3306}:3306"
@@ -31,12 +31,16 @@ services:
     ports:
       - "${APP_PORT:-8080}:8080"
     environment:
-      DB_URL: jdbc:mysql://mysql:3306/campus_errand?useSSL=false&serverTimezone=UTC&rewriteBatchedStatements=true&allowPublicKeyRetrieval=true
+      DB_URL: jdbc:mysql://mysql:3306/${DB_NAME:-campus_errand}?useSSL=false&serverTimezone=UTC&rewriteBatchedStatements=true&allowPublicKeyRetrieval=true
       DB_USERNAME: root
       DB_PASSWORD: ${DB_PASSWORD:-change-me}
       REDIS_HOST: redis
       REDIS_PORT: 6379
       REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      REDIS_TIMEOUT: ${REDIS_TIMEOUT:-200ms}
+      DB_POOL_SIZE: ${DB_POOL_SIZE:-20}
+      REDIS_PREFILTER_ENABLED: ${REDIS_PREFILTER_ENABLED:-true}
+      RATE_LIMIT_ENABLED: ${RATE_LIMIT_ENABLED:-true}
       JWT_SECRET: ${JWT_SECRET:-replace-this-in-production-with-a-long-random-secret}
       ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-change-me-admin}

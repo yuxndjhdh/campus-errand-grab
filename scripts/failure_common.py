@@ -9,6 +9,7 @@ import secrets
 import subprocess
 import time
 from datetime import datetime, timezone
+from decimal import Decimal
 from pathlib import Path
 from typing import Any, Callable
 
@@ -20,8 +21,20 @@ ROOT = Path(__file__).resolve().parents[1]
 REPORT_DIR = ROOT / "reports" / "failure-tests"
 
 
+def json_default(value: Any) -> Any:
+    if isinstance(value, Decimal):
+        return int(value) if value == value.to_integral_value() else float(value)
+    if isinstance(value, datetime):
+        return value.isoformat()
+    raise TypeError(f"Object of type {type(value).__name__} is not JSON serializable")
+
+
 def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def unique_key(prefix: str) -> str:
+    return f"{prefix}-{secrets.token_hex(8)}"
 
 
 def add_common_arguments(parser: argparse.ArgumentParser) -> None:
@@ -131,6 +144,24 @@ def recon(session: requests.Session, base: str, token: str) -> dict[str, Any]:
     return payload["data"]
 
 
+def get_order(session: requests.Session, base: str, order_id: int, token: str | None = None) -> dict[str, Any]:
+    status, payload, _ = json_request(session, "GET", base, f"/api/orders/{order_id}", token=token)
+    if status != 200:
+        raise RuntimeError(f"order lookup failed: HTTP {status} {payload}")
+    return payload["data"]
+
+
+def prometheus_metric(session: requests.Session, base: str, name: str) -> float:
+    response = session.get(base + "/actuator/prometheus", timeout=10)
+    if response.status_code != 200:
+        raise RuntimeError(f"Prometheus endpoint failed: HTTP {response.status_code} {response.text[:500]}")
+    prefix = name + " "
+    for line in response.text.splitlines():
+        if line.startswith(prefix):
+            return float(line[len(prefix):].split()[0])
+    raise RuntimeError(f"metric not found: {name}")
+
+
 def db_connection(database: str | None = None):
     return pymysql.connect(
         host=os.getenv("DB_HOST", "127.0.0.1"),
@@ -143,13 +174,12 @@ def db_connection(database: str | None = None):
 
 
 def compose(compose_file: str, *arguments: str) -> str:
-    result = subprocess.run(
-        ["docker", "compose", "-f", compose_file, *arguments],
-        cwd=ROOT,
-        check=True,
-        capture_output=True,
-        text=True,
-    )
+    command = ["docker", "compose", "-f", compose_file, *arguments]
+    try:
+        result = subprocess.run(command, cwd=ROOT, check=True, capture_output=True, text=True)
+    except subprocess.CalledProcessError as exc:
+        details = (exc.stderr or exc.stdout or "").strip()
+        raise RuntimeError(f"{' '.join(command)} failed: {details}") from exc
     return result.stdout.strip()
 
 
@@ -174,9 +204,12 @@ def wait_until(predicate: Callable[[], bool], timeout: float = 30, interval: flo
 
 def write_report(name: str, report: dict[str, Any]) -> Path:
     REPORT_DIR.mkdir(parents=True, exist_ok=True)
-    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
     path = REPORT_DIR / f"{name}-{stamp}.json"
-    path.write_text(json.dumps(report, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
+    path.write_text(
+        json.dumps(report, ensure_ascii=True, indent=2, default=json_default) + "\n",
+        encoding="utf-8",
+    )
     return path
 
 
@@ -190,6 +223,6 @@ def run_scenario(name: str, callback: Callable[[], dict[str, Any]]) -> int:
         report.update({"passed": False, "errorType": type(exc).__name__, "error": str(exc)})
     report["finishedAt"] = utc_now()
     path = write_report(name, report)
-    print(json.dumps(report, ensure_ascii=True, indent=2))
+    print(json.dumps(report, ensure_ascii=True, indent=2, default=json_default))
     print(f"report={path}")
     return 0 if report["passed"] else 1

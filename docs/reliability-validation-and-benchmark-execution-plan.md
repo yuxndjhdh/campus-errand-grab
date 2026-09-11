@@ -32,12 +32,12 @@
 - Dockerfile、Compose、GitHub Actions、Prometheus、Grafana。
 - Python 和 k6 压测入口。
 
-当前限制：
+截至 2026-09-11 的本地执行结果：
 
-- 当前机器没有可用的 Docker 命令，尚未运行完整 Testcontainers 测试。
-- P0 的新增代码和测试仍位于未提交工作区。
-- `reports/` 中没有正式运行证据和压测结果。
-- Git 仓库没有 remote，GitHub Actions 尚无实际运行记录。
+- Docker Desktop、WSL2 和 Docker Engine 已可用；空 Maven 缓存构建及完整 Testcontainers 测试连续三次通过。
+- Compose/Flyway/冒烟、四类故障演示、Prometheus/Grafana/告警和脱敏监控快照均有 `reports/` 证据。
+- 正式压测矩阵、300 秒持续负载、Redis 故障、结算重试、原始 JSON、图表和正式报告均已生成。
+- P0 改动仍是未提交工作区改动；远程 GitHub Actions 全绿记录和分支保护不在本轮执行范围内。
 
 ## 3. 执行总览
 
@@ -543,26 +543,28 @@ reports/benchmarks/
 
 同时满足以下条件后，才能判定本方案全部完成：
 
-- [ ] 完整 Testcontainers 测试连续三次通过。
+- [x] 完整 Testcontainers 测试连续三次通过。
 - [ ] P0 可靠性改动已经提交，工作区干净。
-- [ ] `docker compose up --build` 可在新环境一键启动。
-- [ ] 四类故障验证脚本全部通过。
-- [ ] Prometheus 指标、Grafana 面板和告警均经过实际验证。
+- [x] `docker compose up --build` 可在新环境一键启动。
+- [x] 四类故障验证脚本全部通过。
+- [x] Prometheus 指标、Grafana 面板和告警均经过实际验证。
 - [ ] 远程 CI 在干净 Runner 中全绿。
-- [ ] 正式压测至少覆盖热点、多订单、持续负载和 Redis 故障。
-- [ ] 仓库包含原始压测数据、图表和正式报告。
-- [ ] README、设计文档、测试与实现一致。
-- [ ] 简历只引用可复现、可追溯的项目结果。
+- [x] 正式压测至少覆盖热点、多订单、持续负载和 Redis 故障。
+- [x] 仓库包含原始压测数据、图表和正式报告。
+- [x] README、设计文档、测试与实现一致。
+- [x] 简历只引用可复现、可追溯的项目结果。
 
 ## 13. 立即执行清单
 
-- [ ] 安装并启动 Docker Desktop。
-- [ ] 执行一次 `mvn clean verify`，保存首次失败信息。
-- [ ] 修复失败项并连续运行三次。
+- [x] 安装并启动 Docker Desktop。
+- [x] 执行一次 `mvn clean verify`，保存首次失败信息。
+- [x] 修复失败项并连续运行三次。
 - [ ] 审查并提交当前 P0 工作区改动。
-- [ ] 启动完整 Compose 环境并执行冒烟测试。
-- [ ] 完成故障验证脚本。
-- [ ] 完成指标、Grafana 和告警验收。
+- [x] 启动完整 Compose 环境并执行冒烟测试。
+- [x] 完成故障验证脚本。
+- [x] 完成指标、Grafana 和告警验收。
 - [ ] 推送远程仓库并验证 CI。
-- [ ] 执行正式压测并生成报告。
-- [ ] 同步 README、路线图和简历材料。
+- [x] 执行正式压测并生成报告。
+- [x] 同步 README、路线图和简历材料。
+
+本方案的本地可执行部分已完成；未勾选项明确属于 Git 提交、推送和远程 CI，不在本轮操作范围内。

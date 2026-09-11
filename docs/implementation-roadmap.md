@@ -23,19 +23,18 @@
 - 使用幂等键、订单状态 CAS 和账本唯一约束防止重复结算。
 - 使用 Redis ZSet 与数据库扫描处理订单超时。
 - 实现 5 项资金及状态不变量对账。
-- 已有 13 个通过的单元及真实 MySQL/Redis 集成测试。
+- 测试源包含 47 个 `@Test` 方法，覆盖单元、真实数据库、Redis 和 Toxiproxy 场景。
 
-当前主要不足：
+截至 2026-09-11 的本地实现与证据状态：
 
-- 抢单成功后未写入送达超时 ZSet，双通道超时机制没有完全闭环。
-- Redis 过滤失败后仍查询数据库，尚未真正减少数据库总请求数。
-- Redis 故障测试只覆盖 `FLUSHDB`，没有模拟断连和超时。
-- 送达 SQL 没有校验送达截止时间。
-- 系统账户参与普通业务时可能导致结算异常。
-- 客户端可直接传入任意用户 ID，缺少身份认证和权限控制。
-- 数据库密码以明文写入配置和脚本。
-- 缺少 Docker Compose、Testcontainers、CI 和正式压测报告。
-- 后台任务吞掉异常，缺少日志、指标和告警。
+| 范围 | 当前状态 | 可追溯证据 |
+| --- | --- | --- |
+| T1-T14 的核心实现与测试 | 已实现，Docker/Testcontainers 全量验证连续三次通过 | `src/main`、`src/test`、`target/surefire-reports` |
+| N7/C 阶段故障演示 | 四类脚本已实际运行并通过 | `scripts/verify_*.py`、`reports/failure-tests/` |
+| D 阶段指标、面板和告警 | 指标、三类面板、DEAD/对账/队列告警均已实际触发并恢复 | `scripts/validate_monitoring.py`、`reports/monitoring/`、Grafana JSON |
+| N9/N10/F-G 阶段正式压测 | 10 个变体各 1 次预热和 5 次正式运行，另有持续负载、Redis 故障和结算重试 | `scripts/run_benchmarks.py`、`reports/benchmarks/benchmark-report.md` |
+
+本轮本地验收已经完成；远程 GitHub Actions 全绿记录、提交拆分和推送仍按验收范围保留为后续 Git 工作，不把本地结果表述为远程 CI 结果。
 
 ## 3. 目标架构
 

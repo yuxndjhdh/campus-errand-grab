@@ -14,10 +14,13 @@ from failure_common import (
     create_order,
     db_connection,
     json_request,
+    recharge,
     recon,
     register_and_login,
     require_test_environment,
     run_scenario,
+    unique_key,
+    utc_now,
 )
 
 
@@ -32,9 +35,7 @@ def main() -> int:
         session = requests.Session()
         _, publisher_token = register_and_login(session, args.base, "settlement-publisher")
         taker_id, taker_token = register_and_login(session, args.base, "settlement-taker")
-        from failure_common import recharge
-
-        recharge(session, args.base, publisher_token, 10_000, "failure-settlement-recharge")
+        recharge(session, args.base, publisher_token, 10_000, unique_key("failure-settlement-recharge"))
         order_id = create_order(session, args.base, publisher_token, "duplicate settlement")
         status, payload, _ = json_request(
             session, "POST", args.base, f"/api/orders/{order_id}/grab", token=taker_token
@@ -47,14 +48,19 @@ def main() -> int:
                 requests.Session(), "POST", args.base, f"/api/orders/{order_id}/deliver", token=taker_token
             )
 
+        settlement_started_at = utc_now()
         with ThreadPoolExecutor(max_workers=args.clients) as pool:
             results = list(pool.map(lambda _: deliver(), range(args.clients)))
+        settlement_finished_at = utc_now()
         successes = [result for result in results if result[0] == 200]
         errors = [result for result in results if result[0] >= 500]
         if len(successes) != 1:
             raise AssertionError(f"expected one successful delivery/settlement, got {len(successes)}")
         if errors:
             raise AssertionError(f"duplicate settlement produced system errors: {errors}")
+        non_success_statuses = {result[0] for result in results if result[0] != 200}
+        if non_success_statuses - {409}:
+            raise AssertionError(f"duplicate delivery did not produce business conflicts: {non_success_statuses}")
 
         connection = db_connection()
         try:
@@ -69,11 +75,14 @@ def main() -> int:
                 settle_entries = cursor.fetchone()[0]
                 cursor.execute("SELECT COALESCE(SUM(amount_cents),0) FROM t_ledger_entry")
                 ledger_total = cursor.fetchone()[0]
+                cursor.execute("SELECT status FROM t_errand_order WHERE id=%s", (order_id,))
+                order_status = cursor.fetchone()[0]
         finally:
             connection.close()
-        if idempotency_count != 1 or settle_entries != 3 or ledger_total != 0:
+        if order_status != "SETTLED" or idempotency_count != 1 or settle_entries != 3 or ledger_total != 0:
             raise AssertionError(
-                f"settlement invariants failed: idempotency={idempotency_count}, entries={settle_entries}, total={ledger_total}"
+                f"settlement invariants failed: status={order_status}, idempotency={idempotency_count}, "
+                f"entries={settle_entries}, total={ledger_total}"
             )
         report = recon(session, args.base, admin_token(session, args.base))
         if not report.get("passed"):
@@ -86,6 +95,9 @@ def main() -> int:
             "settlementIdempotencyRows": idempotency_count,
             "settlementLedgerEntries": settle_entries,
             "ledgerTotal": ledger_total,
+            "orderStatus": order_status,
+            "concurrencyStartedAt": settlement_started_at,
+            "concurrencyFinishedAt": settlement_finished_at,
             "reconciliation": report,
         }
 

@@ -8,6 +8,7 @@ import com.yu.errand.service.SettlementService;
 import com.yu.errand.support.IntegrationTestBase;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.test.context.TestPropertySource;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -21,6 +22,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 
+@TestPropertySource(properties = "app.grab.rate-limit-enabled=false")
 class TimeoutDualSafetyIT extends IntegrationTestBase {
     @Autowired private OrderService orders;
     @Autowired private GrabService grab;
@@ -108,7 +110,7 @@ class TimeoutDualSafetyIT extends IntegrationTestBase {
             for (int i = 0; i < 100; i++) {
                 long orderId = orders.create(publisher, "delivery race " + i, null, 1000, 120L).id();
                 grab.grab(orderId, taker);
-                jdbc.update("UPDATE t_errand_order SET deliver_deadline_at=DATE_ADD(NOW(3), INTERVAL 100 MILLISECOND) WHERE id=?", orderId);
+                jdbc.update("UPDATE t_errand_order SET deliver_deadline_at=DATE_ADD(NOW(3), INTERVAL 100000 MICROSECOND) WHERE id=?", orderId);
 
                 CountDownLatch ready = new CountDownLatch(2);
                 CountDownLatch start = new CountDownLatch(1);

@@ -186,7 +186,7 @@ class OutboxReliabilityIT extends IntegrationTestBase {
                 assertEquals(attempt, jdbc.queryForObject("SELECT retry_count FROM t_outbox_event WHERE id=?", Integer.class, eventId));
                 long expectedDelayMillis = Math.min(300, 1L << Math.min(attempt - 1, 8)) * 1000L;
                 long actualDelayMillis = jdbc.queryForObject(
-                        "SELECT TIMESTAMPDIFF(MILLISECOND,NOW(3),next_retry_at) FROM t_outbox_event WHERE id=?",
+                        "SELECT TIMESTAMPDIFF(MICROSECOND,NOW(3),next_retry_at) DIV 1000 FROM t_outbox_event WHERE id=?",
                         Long.class, eventId);
                 assertTrue(actualDelayMillis >= expectedDelayMillis - 500,
                         "retry backoff was shorter than expected for attempt " + attempt);

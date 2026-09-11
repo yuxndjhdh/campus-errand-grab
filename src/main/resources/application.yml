@@ -25,7 +25,7 @@ spring:
     username: ${DB_USERNAME:root}
     password: ${DB_PASSWORD:}
     hikari:
-      maximum-pool-size: 20
+      maximum-pool-size: ${DB_POOL_SIZE:20}
       pool-name: errand-pool
 
   flyway:
@@ -47,8 +47,12 @@ spring:
 app:
   grab:
     # Flip to false to measure the same correctness with N x more DB writes.
-    redis-prefilter-enabled: true
-    marker-ttl-slack-seconds: 30
+    redis-prefilter-enabled: ${REDIS_PREFILTER_ENABLED:true}
+    marker-ttl-slack-seconds: ${MARKER_TTL_SLACK_SECONDS:30}
+    rate-limit-enabled: ${RATE_LIMIT_ENABLED:true}
+    rate-limit-per-user: ${RATE_LIMIT_PER_USER:30}
+    rate-limit-per-order: ${RATE_LIMIT_PER_ORDER:200}
+    rate-limit-window-seconds: ${RATE_LIMIT_WINDOW_SECONDS:10}
   order:
     claim-ttl-seconds: 300
     deliver-ttl-seconds: 3600

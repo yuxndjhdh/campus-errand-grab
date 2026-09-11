@@ -29,6 +29,8 @@
     <java.version>21</java.version>
     <maven.compiler.release>21</maven.compiler.release>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    <!-- Keep all Testcontainers modules aligned with the Docker 29 test runtime. -->
+    <testcontainers.version>1.20.3</testcontainers.version>
   </properties>
 
   <dependencies>
@@ -140,6 +142,12 @@
             <include>**/*Test.java</include>
             <include>**/*IT.java</include>
           </includes>
+          <systemPropertyVariables>
+            <!-- Docker Engine 29 no longer accepts the client default API 1.32. -->
+            <api.version>1.40</api.version>
+            <!-- Testcontainers MySQL uses UTC; keep SQL deadlines and Java clocks aligned. -->
+            <user.timezone>UTC</user.timezone>
+          </systemPropertyVariables>
         </configuration>
       </plugin>
     </plugins>

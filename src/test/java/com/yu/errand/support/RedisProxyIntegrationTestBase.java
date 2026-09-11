@@ -9,8 +9,10 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.annotation.DirtiesContext;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.MySQLContainer;
+import org.testcontainers.containers.Network;
 import org.testcontainers.containers.ToxiproxyContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -18,7 +20,10 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.NONE)
 @ActiveProfiles("test")
 @Testcontainers
+@DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 public abstract class RedisProxyIntegrationTestBase {
+    private static final Network NETWORK = Network.newNetwork();
+
     @Container
     protected static final MySQLContainer<?> MYSQL = new MySQLContainer<>("mysql:8.4")
             .withDatabaseName("campus_errand_proxy_test")
@@ -27,10 +32,13 @@ public abstract class RedisProxyIntegrationTestBase {
 
     @Container
     protected static final GenericContainer<?> REDIS = new GenericContainer<>("redis:7-alpine")
+            .withNetwork(NETWORK)
+            .withNetworkAliases("redis")
             .withExposedPorts(6379);
 
     @Container
     protected static final ToxiproxyContainer TOXIPROXY = new ToxiproxyContainer("ghcr.io/shopify/toxiproxy:2.5.0")
+            .withNetwork(NETWORK)
             .dependsOn(REDIS);
 
     protected static ToxiproxyContainer.ContainerProxy REDIS_PROXY;

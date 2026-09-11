@@ -23,11 +23,14 @@
       "title": "HTTP error ratio and latency",
       "type": "timeseries",
       "gridPos": {"h": 9, "w": 12, "x": 12, "y": 0},
-      "fieldConfig": {"defaults": {"unit": "percentunit", "min": 0}, "overrides": []},
+      "fieldConfig": {"defaults": {"unit": "short", "min": 0}, "overrides": [
+        {"matcher": {"id": "byFrameRefID", "options": "A"}, "properties": [{"id": "unit", "value": "percentunit"}]},
+        {"matcher": {"id": "byFrameRefID", "options": "B"}, "properties": [{"id": "unit", "value": "s"}]}
+      ]},
       "options": {"legend": {"displayMode": "table", "placement": "bottom"}, "tooltip": {"mode": "multi"}},
       "targets": [
-        {"expr": "sum(rate(http_server_requests_seconds_count{status=~\"5..\"}[5m])) / clamp_min(sum(rate(http_server_requests_seconds_count[5m])), 1)", "legendFormat": "5xx ratio"},
-        {"expr": "histogram_quantile(0.95, sum(rate(http_server_requests_seconds_bucket[5m])) by (le))", "legendFormat": "HTTP p95"}
+        {"refId": "A", "expr": "sum(rate(http_server_requests_seconds_count{status=~\"5..\"}[5m])) / clamp_min(sum(rate(http_server_requests_seconds_count[5m])), 1)", "legendFormat": "5xx ratio"},
+        {"refId": "B", "expr": "histogram_quantile(0.95, sum(rate(http_server_requests_seconds_bucket[5m])) by (le))", "legendFormat": "HTTP p95"}
       ]
     },
     {
@@ -35,7 +38,12 @@
       "title": "Async reliability",
       "type": "timeseries",
       "gridPos": {"h": 9, "w": 12, "x": 0, "y": 9},
-      "fieldConfig": {"defaults": {"unit": "short", "min": 0}, "overrides": []},
+      "fieldConfig": {"defaults": {"unit": "short", "min": 0}, "overrides": [
+        {"matcher": {"id": "byName", "options": "publish success/s"}, "properties": [{"id": "unit", "value": "reqps"}]},
+        {"matcher": {"id": "byName", "options": "publish failure/s"}, "properties": [{"id": "unit", "value": "reqps"}]},
+        {"matcher": {"id": "byName", "options": "timeout lag (s)"}, "properties": [{"id": "unit", "value": "s"}]},
+        {"matcher": {"id": "byName", "options": "Redis degraded/s"}, "properties": [{"id": "unit", "value": "reqps"}]}
+      ]},
       "options": {"legend": {"displayMode": "table", "placement": "bottom"}, "tooltip": {"mode": "multi"}},
       "targets": [
         {"expr": "outbox_pending", "legendFormat": "Outbox pending"},
@@ -63,12 +71,16 @@
       "title": "Financial reconciliation",
       "type": "timeseries",
       "gridPos": {"h": 9, "w": 12, "x": 0, "y": 18},
-      "fieldConfig": {"defaults": {"unit": "short", "min": 0}, "overrides": []},
+      "fieldConfig": {"defaults": {"unit": "short", "min": 0}, "overrides": [
+        {"matcher": {"id": "byName", "options": "recon failures/s"}, "properties": [{"id": "unit", "value": "reqps"}]},
+        {"matcher": {"id": "byName", "options": "settlement retries/s"}, "properties": [{"id": "unit", "value": "reqps"}]},
+        {"matcher": {"id": "byName", "options": "last success timestamp"}, "properties": [{"id": "unit", "value": "dateTimeAsIso"}]}
+      ]},
       "options": {"legend": {"displayMode": "table", "placement": "bottom"}, "tooltip": {"mode": "multi"}},
       "targets": [
         {"expr": "rate(recon_failure_total[5m])", "legendFormat": "recon failures/s"},
         {"expr": "rate(settlement_retry_total[5m])", "legendFormat": "settlement retries/s"},
-        {"expr": "settlement_dead_total", "legendFormat": "settlement dead"},
+        {"expr": "settlement_dead", "legendFormat": "settlement dead"},
         {"expr": "recon_last_success_timestamp", "legendFormat": "last success timestamp"}
       ]
     },
