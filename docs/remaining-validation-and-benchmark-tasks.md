@@ -2,7 +2,7 @@
 
 ## 1. 文档目的
 
-本文汇总项目当前仍未完成或尚未形成充分证据的任务。
+本文记录本地验收任务的执行结果，并保留尚未授权执行的 Git/远程 CI 工作。当前本地可执行项已经完成；生产安全、高可用和业务外围能力另见 `docs/outstanding-work-plan.md`。
 
 本轮暂不处理以下 Git 相关工作：
 
@@ -22,24 +22,25 @@
 - Redis Lua 前置过滤、限流、故障降级和恢复重建。
 - Outbox 独立领取事务、租约、重试、DEAD 和人工重放。
 - JWT、BCrypt、RBAC 和身份越权测试。
-- 本地一次完整测试：47 个测试，0 失败、0 错误、0 跳过。
+- 本地空 Maven 仓库构建及完整测试连续三次通过：每次 53 个测试，0 失败、0 错误、0 跳过。
 - JaCoCo 报告生成。
 - App、MySQL、Redis、Prometheus、Grafana 的 Compose 环境启动。
 - Redis 故障、Outbox 恢复、重复结算、对账漂移四类故障脚本成功运行。
-- 一次真实 k6 热点订单测试及原始数据保存。
+- 正式 Python HTTP 压测矩阵、300 秒持续负载、Redis 故障和结算重试均已生成原始报告。
 
 ## 3. 剩余任务总览
 
 | 优先级 | 任务 | 当前缺口 | 完成标志 |
 | --- | --- | --- | --- |
-| P0 | 完整测试连续运行三次 | 目前只有一次完整通过记录 | 三次均为 `BUILD SUCCESS`，无失败、错误和跳过 |
-| P0 | 修复干净环境的 Maven 可复现性 | 远程 Runner 曾出现依赖包无法解析 | 本地空缓存或容器化 Maven 构建成功 |
-| P1 | 补齐 Compose 运行验收证据 | 服务正常，但缺少标准化结果文件 | 运行状态、冒烟结果、Flyway 迁移记录落盘 |
-| P1 | 完成 Grafana 和告警实测 | 服务和规则已加载，但缺少实际触发与截图 | 三类面板截图和告警触发证据齐全 |
-| P1 | 整理故障演示证据 | 四类脚本已通过，但报告中保留了一份历史失败结果 | 成功报告索引清晰，失败样本被明确标注 |
-| P2 | 执行正式压测矩阵 | 当前报告为 `PARTIAL` | 热点、多订单、持续负载、Redis 故障均有重复数据 |
-| P2 | 生成正式压测结论和图表 | 只有一次热点订单结果 | 每个结论均能追溯到原始 JSON/CSV |
-| P2 | 同步项目文档和简历材料 | 多个复选框和环境描述已过时 | README、路线图、报告和简历数字一致 |
+| P0 | 完整测试连续运行三次 | 已完成 | 三次均为 `BUILD SUCCESS`，每次 53 个测试且无失败、错误和跳过 |
+| P0 | 修复干净环境的 Maven 可复现性 | 已完成 | 临时空 Maven 仓库构建成功，依赖由项目设置解析 |
+| P1 | 补齐 Compose 运行验收证据 | 已完成 | 运行状态、冒烟结果、Flyway 迁移记录已落盘 |
+| P1 | 完成 Grafana 和告警实测 | 已完成 | 三类面板快照和告警触发/恢复证据齐全 |
+| P1 | 整理故障演示证据 | 已完成 | 成功报告索引清晰，历史失败样本明确排除 |
+| P2 | 执行正式压测矩阵 | 已完成 | 10 个变体各 1 次预热和 5 次正式运行，并补充特殊场景 |
+| P2 | 生成正式压测结论和图表 | 已完成 | 报告状态为 `COMPLETE`，结论可追溯至原始 JSON |
+| P2 | 同步项目文档和简历材料 | 本轮完成 | README、路线图、报告和简历数字已按最新证据同步 |
+| P1 | Git 提交、推送和远程 CI | 本轮不执行 | 需要用户授权后再提交、推送并验证远程工作流 |
 
 ## 4. P0：测试稳定性与干净环境构建
 
@@ -75,7 +76,7 @@
 
 ### 4.2 验证 Maven 在干净环境可构建
 
-远程 GitHub Actions 最近一次失败发生在 Maven 编译阶段，表现为 Spring、Jackson、Micrometer 等依赖类无法解析。本地缓存完整不能证明新机器可以成功构建。
+历史远程 GitHub Actions 曾在 Maven 编译阶段出现依赖解析失败。本轮已用临时空 Maven 仓库完成构建，证明本地不依赖现有用户缓存；当前未提交工作区仍未重新推送，因此不能把该本地证据表述为当前远程 CI 结果。
 
 需要检查：
 
@@ -232,7 +233,7 @@ reports/monitoring/financial-reconciliation.png
 
 ## 8. P2：正式压测矩阵
 
-当前仅有一次 k6 热点订单结果，报告状态仍为 `PARTIAL`。该结果不能代表整个系统的稳定吞吐或容量上限。
+正式报告 `reports/benchmarks/benchmark-report.md` 当前状态为 `COMPLETE`。矩阵包含 10 个热点/多订单变体，每个变体 1 次预热和 5 次正式运行，并补充 300 秒持续负载、Redis 故障和结算重试场景；这些数据仍只描述本地 Windows Docker 环境，不代表生产容量上限。
 
 ### 8.1 测试前准备
 
@@ -276,7 +277,7 @@ reports/monitoring/financial-reconciliation.png
 
 ## 9. P2：压测报告和图表
 
-完成测试矩阵后，将当前 `PARTIAL` 报告升级为正式报告。
+正式报告已经由原始数据生成，当前状态为 `COMPLETE`。
 
 报告必须包括：
 
@@ -304,27 +305,27 @@ reports/benchmarks/benchmark-report.md
 - [x] 图表由原始数据生成，不手工填写数据点。
 - [x] 每个表格和结论都能定位到原始结果文件。
 - [x] 报告不使用估算数字。
-- [x] 当前一次热点测试结果被明确标注适用范围。
-- [x] `benchmark-report.md` 不再标记为 `PARTIAL`。
+- [x] 矩阵、持续负载和故障场景结果均明确标注适用范围。
+- [x] `benchmark-report.md` 状态为 `COMPLETE`。
 
 ## 10. P2：文档和简历材料收尾
 
-最后统一更新：
+本轮已完成同步：
 
 - `README.md`
 - `docs/implementation-roadmap.md`
-- `docs/next-tasks.md`
+- `docs/project-validation-and-ci-follow-up.md`
 - `docs/reliability-validation-and-benchmark-execution-plan.md`
 - `docs/failure-recovery.md`
 
-需要处理：
+同步内容：
 
 - 将已有代码和报告支持的任务标记为完成。
 - 删除“当前机器没有 Docker”等过时描述。
 - README 补充一键运行、冒烟测试、监控入口和正式压测摘要。
 - 保证可靠性结论都能对应到自动化测试或故障报告。
 - 只将正式压测报告中可复现的数字写入简历。
-- 不把一次热点订单结果表述为系统整体容量。
+- 不把本地压测结果表述为系统整体容量。
 
 验收清单：
 
@@ -363,9 +364,10 @@ reports/benchmarks/benchmark-report.md
 
 本地验收已完成。关键证据如下：
 
-- 空 Maven 缓存构建和完整测试连续三次通过，每次 47 个测试，失败、错误、跳过均为 0。
-- 正式矩阵索引为 `reports/benchmarks/raw/run-index-20260911-103556-363038.json`；10 个变体均有 1 次预热和 5 次正式运行。
+- 空 Maven 缓存构建和完整测试连续三次通过，每次 53 个测试，失败、错误、跳过均为 0；运行日志见 `reports/runtime/maven-verify-current-run-1.log` 至 `maven-verify-current-run-3.log`。
+- 正式矩阵索引为 `reports/benchmarks/raw/run-index-20260911-172249-692653.json`；10 个变体均有 1 次预热和 5 次正式运行。
 - 正式报告为 `reports/benchmarks/benchmark-report.md`，状态为 `COMPLETE`；另有 300 秒持续负载、Redis 故障和结算重试原始报告。
+- 最新持续负载报告为 `reports/benchmarks/raw/sustained-300s-on-pool20-20260911-174225.json`；Redis 故障和结算重试报告分别为 `redis-fault-200-on-pool20-20260911-174813.json`、`settlement-retry-pool20-20260911-174921.json`。
 - 四类故障成功报告索引为 `reports/failure-tests/index.md`；历史失败样本明确排除。
 - 监控实测证据为 `reports/monitoring/monitoring-validation.json` 和三张脱敏 PNG 指标快照。
 - Git 提交、推送和远程 GitHub Actions 全绿记录按本文第 1 节约束暂不处理。

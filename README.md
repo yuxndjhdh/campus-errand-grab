@@ -33,6 +33,10 @@ http://127.0.0.1:8080/actuator/prometheus
 http://127.0.0.1:3000
 ```
 
+Grafana 首次启动的管理员账号由 `GRAFANA_ADMIN_USER` 和 `GRAFANA_ADMIN_PASSWORD` 配置；监控验收脚本也读取这两个变量。使用持久化的 `grafana-data` 卷时，修改环境变量不会覆盖已有密码，需要在 Grafana 中修改密码或清理该测试卷后重新初始化。
+
+生产基线使用 `docker compose -f compose.yml -f compose.production.yml up -d --build`。该覆盖配置不发布 MySQL、Redis、Prometheus、Grafana 或应用管理端口；应用 API 和管理指标分别使用反向代理/内部网络暴露。生产 profile 会拒绝默认 JWT、数据库、管理员和 Redis 密钥，并支持通过 `JWT_PREVIOUS_SECRET` 在轮换窗口内验证旧令牌。生产部署仍需在反向代理层配置 TLS、访问控制和备份策略。
+
 不使用 Compose 时，运行 `mvn -s mvn-settings.xml verify`；集成测试会自动启动 MySQL 和 Redis Testcontainers，因此不读取本机固定端口。需要本机安装并运行 Docker。
 
 ## API 流程

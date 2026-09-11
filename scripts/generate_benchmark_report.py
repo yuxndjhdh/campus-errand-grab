@@ -24,6 +24,7 @@ MATRIX = (
     ("mixed-1000x20", "on"), ("mixed-1000x20", "off"),
     ("mixed-1000x50", "on"), ("mixed-1000x50", "off"),
 )
+METRIC_FIELDS = ("dbCasDelta", "redisFilteredDelta", "rateLimitedDelta", "grabAttemptsDelta", "grabWinnersDelta")
 
 
 def read_json(path: Path) -> dict[str, Any]:
@@ -65,8 +66,51 @@ def median_or_zero(items: list[float]) -> float:
     return statistics.median(items) if items else 0.0
 
 
+def is_number(value: Any) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def metric_state(report: dict[str, Any]) -> dict[str, Any]:
+    """Classify metric evidence without treating an absent field as a measured zero."""
+    if report.get("metricsComplete") is True:
+        missing = [field for field in METRIC_FIELDS if not is_number(report.get(field))]
+        if not missing:
+            return {
+                "status": "complete",
+                "deltas": {field: int(report[field]) for field in METRIC_FIELDS},
+            }
+        return {
+            "status": "collection_failed",
+            "reason": "metricsComplete=true but numeric deltas are missing: " + ", ".join(missing),
+        }
+
+    details = report.get("metricsUnavailable") or report.get("metrics") or {}
+    if isinstance(details, dict) and details.get("status") == "collection_failed":
+        return {
+            "status": "collection_failed",
+            "reason": str(details.get("reason", "metric collection failed")),
+        }
+    return {
+        "status": "not_collected",
+        "reason": "raw report predates the complete metric collection protocol",
+    }
+
+
 def source_link(path: Path) -> str:
     return f"[raw/{path.name}](raw/{path.name})"
+
+
+def svg_notice(path: Path, title: str, message: str) -> None:
+    path.write_text(
+        "\n".join([
+            '<svg xmlns="http://www.w3.org/2000/svg" width="1180" height="560" viewBox="0 0 1180 560">',
+            '<rect width="100%" height="100%" fill="#ffffff"/>',
+            f'<text x="90" y="120" font-family="Arial,sans-serif" font-size="26" font-weight="700" fill="#111827">{html.escape(title)}</text>',
+            f'<text x="90" y="170" font-family="Arial,sans-serif" font-size="18" fill="#4b5563">{html.escape(message)}</text>',
+            "</svg>",
+        ]) + "\n",
+        encoding="utf-8",
+    )
 
 
 def svg_chart(path: Path, title: str, labels: list[str], series: dict[str, list[float]], suffix: str = "") -> None:
@@ -122,6 +166,7 @@ def main() -> int:
     if index and not index.is_absolute():
         index = ROOT / index
     selected_paths = matrix_paths(index)
+    selected_path_set = set(selected_paths)
     selected = [read_json(path) for path in selected_paths]
     groups: dict[tuple[str, str], list[tuple[Path, dict[str, Any]]]] = defaultdict(list)
     for path, report in zip(selected_paths, selected):
@@ -136,9 +181,21 @@ def main() -> int:
         measured = [item for item in entries if not item[1].get("benchmark", {}).get("warmup")]
         warmups = [item for item in entries if item[1].get("benchmark", {}).get("warmup")]
         measured.sort(key=lambda item: int(item[1].get("benchmark", {}).get("run", 0)))
-        valid = len(warmups) >= 1 and len(measured) >= 5 and all(item[1].get("passed") is True for item in measured[:5])
+        selected_measured = measured[:5]
+        states = [metric_state(item[1]) for item in selected_measured]
+        metrics_complete = len(selected_measured) == 5 and all(state["status"] == "complete" for state in states)
+        valid = (
+            len(warmups) >= 1
+            and len(selected_measured) == 5
+            and all(item[1].get("passed") is True for item in selected_measured)
+            and metrics_complete
+        )
         matrix_complete = matrix_complete and valid
-        reports = [item[1] for item in measured[:5] if item[1].get("passed") is True]
+        reports = [item[1] for item in selected_measured if item[1].get("passed") is True]
+        metric_statuses = {state["status"] for state in states}
+        metric_status = "complete" if metrics_complete else (
+            "collection_failed" if "collection_failed" in metric_statuses else "not_collected"
+        )
         row = {
             "scenario": scenario,
             "prefilter": mode,
@@ -155,14 +212,26 @@ def main() -> int:
             "maxLatencyMs": max(values([r.get("latencyMs", {}) for r in reports], "max"), default=0),
             "systemErrorRateMax": max(values(reports, "httpSystemErrorRate"), default=0),
             "reconciliationPasses": sum(1 for r in reports if r.get("reconciliation", {}).get("passed") is True),
-            "sourceFiles": [item[0].name for item in measured[:5]],
+            "sourceFiles": [item[0].name for item in selected_measured],
+            "metricsComplete": metrics_complete,
+            "metricsStatus": metric_status,
+            "metricsReasons": [state["reason"] for state in states if state.get("reason")],
         }
-        row["dbCasTotal"] = sum(int(r.get("dbCasDelta", 0)) for r in reports)
-        row["redisFilteredTotal"] = sum(int(r.get("redisFilteredDelta", 0)) for r in reports)
-        row["filterRate"] = (
-            row["redisFilteredTotal"] / (row["dbCasTotal"] + row["redisFilteredTotal"])
-            if row["dbCasTotal"] + row["redisFilteredTotal"] else 0
-        )
+        if metrics_complete:
+            row["dbCasTotal"] = sum(state["deltas"]["dbCasDelta"] for state in states)
+            row["redisFilteredTotal"] = sum(state["deltas"]["redisFilteredDelta"] for state in states)
+            row["rateLimitedTotal"] = sum(state["deltas"]["rateLimitedDelta"] for state in states)
+            row["grabAttemptsTotal"] = sum(state["deltas"]["grabAttemptsDelta"] for state in states)
+            row["grabWinnersTotal"] = sum(state["deltas"]["grabWinnersDelta"] for state in states)
+            denominator = row["dbCasTotal"] + row["redisFilteredTotal"]
+            row["filterRate"] = row["redisFilteredTotal"] / denominator if denominator else None
+        else:
+            row["dbCasTotal"] = None
+            row["redisFilteredTotal"] = None
+            row["rateLimitedTotal"] = None
+            row["grabAttemptsTotal"] = None
+            row["grabWinnersTotal"] = None
+            row["filterRate"] = None
         matrix_rows.append(row)
 
     special: dict[str, tuple[Path, dict[str, Any]] | None] = {}
@@ -173,7 +242,7 @@ def main() -> int:
             if report.get("passed") is True:
                 candidates.append((path, report))
         special[name] = candidates[0] if candidates else None
-    sustained_complete = special["sustained"] is not None
+    sustained_complete = special["sustained"] is not None and metric_state(special["sustained"][1])["status"] == "complete"
     redis_fault_complete = special["redis-fault"] is not None
     settlement_retry_complete = special["settlement-retry"] is not None
     complete = matrix_complete and sustained_complete and redis_fault_complete and settlement_retry_complete
@@ -182,7 +251,7 @@ def main() -> int:
         raise SystemExit(f"benchmark evidence incomplete: matrix={matrix_complete}, sustained={sustained_complete}, redis_fault={redis_fault_complete}, settlement_retry={settlement_retry_complete}")
 
     csv_path = REPORT_DIR / "summary.csv"
-    columns = ["scenario", "prefilter", "poolSize", "warmups", "measuredRuns", "valid", "rpsMedian", "rpsMin", "rpsMax", "p50MedianMs", "p95MedianMs", "p99MedianMs", "maxLatencyMs", "systemErrorRateMax", "reconciliationPasses", "dbCasTotal", "redisFilteredTotal", "filterRate"]
+    columns = ["scenario", "prefilter", "poolSize", "warmups", "measuredRuns", "valid", "metricsStatus", "metricsComplete", "rpsMedian", "rpsMin", "rpsMax", "p50MedianMs", "p95MedianMs", "p99MedianMs", "maxLatencyMs", "systemErrorRateMax", "reconciliationPasses", "dbCasTotal", "redisFilteredTotal", "rateLimitedTotal", "grabAttemptsTotal", "grabWinnersTotal", "filterRate"]
     with csv_path.open("w", newline="", encoding="utf-8") as stream:
         writer = csv.DictWriter(stream, fieldnames=columns)
         writer.writeheader()
@@ -196,11 +265,14 @@ def main() -> int:
     svg_chart(CHART_DIR / "latency-p99-by-scenario.svg", "Median P99 latency by benchmark variant", labels, {
         "P99 ms": [row["p99MedianMs"] for row in matrix_rows],
     }, "milliseconds")
-    hot_rows = [row for row in matrix_rows if row["scenario"].startswith("hot-")]
-    svg_chart(CHART_DIR / "prefilter-database-pressure.svg", "Hot-order database CAS versus Redis filtering", [row["scenario"] + " " + row["prefilter"] for row in hot_rows], {
-        "DB CAS": [row["dbCasTotal"] for row in hot_rows],
-        "Redis filtered": [row["redisFilteredTotal"] for row in hot_rows],
-    }, "accepted/rejected grab attempts")
+    pressure_rows = [row for row in matrix_rows if row["metricsComplete"]]
+    if pressure_rows:
+        svg_chart(CHART_DIR / "prefilter-database-pressure.svg", "Database CAS versus Redis filtering", [row["scenario"] + " " + row["prefilter"] for row in pressure_rows], {
+            "DB CAS": [row["dbCasTotal"] for row in pressure_rows],
+            "Redis filtered": [row["redisFilteredTotal"] for row in pressure_rows],
+        }, "accepted/rejected grab attempts")
+    else:
+        svg_notice(CHART_DIR / "prefilter-database-pressure.svg", "Database pressure unavailable", "No selected run contains complete counter deltas.")
     if special["sustained"]:
         sustained_report = special["sustained"][1]
         svg_chart(CHART_DIR / "sustained-load.svg", "Sustained load evidence", ["sustained"], {
@@ -210,6 +282,7 @@ def main() -> int:
         }, "recorded values")
 
     failed_raw = []
+    incomplete_raw = []
     for path in sorted(RAW_DIR.glob("*.json")):
         try:
             report = read_json(path)
@@ -221,6 +294,10 @@ def main() -> int:
             or report.get("winnerInvariantPassed") is False
         ):
             failed_raw.append(path)
+        elif path in selected_path_set:
+            state = metric_state(report)
+            if state["status"] != "complete" and report.get("benchmark", {}).get("scenario") in {name for name, _ in MATRIX}:
+                incomplete_raw.append((path, state))
 
     lines = [
         "# Formal Benchmark Report",
@@ -237,34 +314,39 @@ def main() -> int:
         "",
         "## Matrix Completeness",
         "",
-        "| Scenario | Prefilter | Warmups | Measured | Valid | Median RPS | Median P99 (ms) | Reconciliation |",
-        "| --- | --- | ---: | ---: | --- | ---: | ---: | ---: |",
+        "| Scenario | Prefilter | Warmups | Measured | Valid | Metrics | Median RPS | Median P99 (ms) | Reconciliation |",
+        "| --- | --- | ---: | ---: | --- | --- | ---: | ---: | ---: |",
     ]
     for row in matrix_rows:
-        lines.append(f"| {row['scenario']} | {row['prefilter']} | {row['warmups']} | {row['measuredRuns']} | {'yes' if row['valid'] else 'no'} | {row['rpsMedian']:.2f} | {row['p99MedianMs']:.2f} | {row['reconciliationPasses']}/5 |")
+        lines.append(f"| {row['scenario']} | {row['prefilter']} | {row['warmups']} | {row['measuredRuns']} | {'yes' if row['valid'] else 'no'} | {row['metricsStatus']} | {row['rpsMedian']:.2f} | {row['p99MedianMs']:.2f} | {row['reconciliationPasses']}/5 |")
     lines += [
         "",
         "## Results",
         "",
         "| Scenario | Prefilter | RPS min / median / max | P50 / P95 / P99 median (ms) | Max system error rate | DB CAS | Redis filtered | Filter rate |",
-        "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |",
+        "| --- | --- | ---: | ---: | ---: | --- | --- | --- |",
     ]
     for row in matrix_rows:
-        lines.append(f"| {row['scenario']} | {row['prefilter']} | {row['rpsMin']:.2f} / {row['rpsMedian']:.2f} / {row['rpsMax']:.2f} | {row['p50MedianMs']:.2f} / {row['p95MedianMs']:.2f} / {row['p99MedianMs']:.2f} | {row['systemErrorRateMax']:.4f} | {row['dbCasTotal']} | {row['redisFilteredTotal']} | {row['filterRate']:.2%} |")
+        metrics = (
+            f"{row['dbCasTotal']}" if row["metricsComplete"] else f"{row['metricsStatus']}"
+        )
+        redis_filtered = f"{row['redisFilteredTotal']}" if row["metricsComplete"] else "not collected"
+        filter_rate = f"{row['filterRate']:.2%}" if row["metricsComplete"] and row["filterRate"] is not None else "not computed"
+        lines.append(f"| {row['scenario']} | {row['prefilter']} | {row['rpsMin']:.2f} / {row['rpsMedian']:.2f} / {row['rpsMax']:.2f} | {row['p50MedianMs']:.2f} / {row['p95MedianMs']:.2f} / {row['p99MedianMs']:.2f} | {row['systemErrorRateMax']:.4f} | {metrics} | {redis_filtered} | {filter_rate} |")
     lines += [
         "",
-        "The business rejection counts and HTTP status distributions remain in each linked raw JSON report. HTTP 5xx responses are counted separately in `httpSystemErrorRate`; 409 responses are business contention outcomes.",
+        "The business rejection counts and HTTP status distributions remain in each linked raw JSON report. HTTP 5xx responses are counted separately in `httpSystemErrorRate`; 409 responses are business contention outcomes. Database-pressure totals and filter rates are shown only when all five counter deltas were collected; `not_collected` and `collection_failed` are not numeric zeroes.",
         "",
         "## Sustained Load",
         "",
     ]
-    if special["sustained"]:
+    if special["sustained"] and metric_state(special["sustained"][1])["status"] == "complete":
         path, report = special["sustained"]
         lines += [
             f"The sustained run lasted {report.get('durationSeconds')} seconds, processed {report.get('contenders')} grab attempts across {report.get('orders')} orders, settled {report.get('settled')} orders, and recorded {report.get('throughputRps', 0):.2f} RPS. Its winner invariant and five reconciliation invariants passed. Source: {source_link(path)}.",
         ]
     else:
-        lines.append("No passing sustained-load raw report is present yet.")
+        lines.append("No passing sustained-load raw report with complete counter deltas is present yet.")
     lines += ["", "## Redis Fault", ""]
     if special["redis-fault"]:
         path, report = special["redis-fault"]
@@ -305,6 +387,9 @@ def main() -> int:
     if failed_raw:
         lines += ["", "## Historical Failed Samples", "", "The following raw files have `passed: false` and are excluded from the formal results:"]
         lines.extend(f"- {source_link(path)}" for path in failed_raw)
+    if incomplete_raw:
+        lines += ["", "## Metric Collection Gaps", "", "These selected or historical matrix reports are retained as evidence but cannot support database-pressure conclusions:"]
+        lines.extend(f"- {source_link(path)}: **{state['status']}** - {state['reason']}" for path, state in incomplete_raw)
     (REPORT_DIR / "benchmark-report.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
     print(f"benchmark_report={REPORT_DIR / 'benchmark-report.md'}")
     print(f"status={status}")

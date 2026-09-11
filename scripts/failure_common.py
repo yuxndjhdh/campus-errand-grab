@@ -50,10 +50,29 @@ def add_common_arguments(parser: argparse.ArgumentParser) -> None:
 def require_test_environment(args: argparse.Namespace, require_test_database: bool = False) -> None:
     if not args.test_environment:
         raise RuntimeError("refusing to mutate infrastructure without --test-environment")
+    admin_credentials()
+    database_password()
     if require_test_database:
         database = os.getenv("DB_NAME", "campus_errand")
         if "test" not in database.lower():
             raise RuntimeError("reconciliation drift requires DB_NAME containing 'test'")
+
+
+def admin_credentials() -> tuple[str, str]:
+    username = os.getenv("ADMIN_USERNAME", "admin").strip()
+    password = os.getenv("ADMIN_PASSWORD", "change-me-admin")
+    if not username:
+        raise RuntimeError("ADMIN_USERNAME is empty; set it to the Compose administrator username")
+    if not password:
+        raise RuntimeError("ADMIN_PASSWORD is empty; set it to the Compose administrator password")
+    return username, password
+
+
+def database_password() -> str:
+    password = os.getenv("DB_PASSWORD", "change-me")
+    if not password:
+        raise RuntimeError("DB_PASSWORD is empty; set it to the Compose database password")
+    return password
 
 
 def json_request(
@@ -127,8 +146,7 @@ def create_order(session: requests.Session, base: str, token: str, title: str, r
 
 
 def admin_token(session: requests.Session, base: str) -> str:
-    username = os.getenv("ADMIN_USERNAME", "admin")
-    password = os.environ["ADMIN_PASSWORD"]
+    username, password = admin_credentials()
     status, payload, _ = json_request(
         session, "POST", base, "/api/auth/login", {"username": username, "password": password}
     )
@@ -165,9 +183,9 @@ def prometheus_metric(session: requests.Session, base: str, name: str) -> float:
 def db_connection(database: str | None = None):
     return pymysql.connect(
         host=os.getenv("DB_HOST", "127.0.0.1"),
-        port=int(os.getenv("DB_PORT", "3306")),
+        port=int(os.getenv("DB_PORT", os.getenv("MYSQL_PORT", "3306"))),
         user=os.getenv("DB_USERNAME", "root"),
-        password=os.getenv("DB_PASSWORD", ""),
+        password=database_password(),
         database=database or os.getenv("DB_NAME", "campus_errand"),
         autocommit=True,
     )

@@ -85,6 +85,7 @@ def configure_runtime(args: argparse.Namespace, prefilter: str, pool_size: str) 
         {
             "REDIS_PREFILTER_ENABLED": "true" if prefilter == "on" else "false",
             "DB_POOL_SIZE": pool_size,
+            "RATE_LIMIT_ENABLED": args.rate_limit_enabled,
         },
         "up",
         "-d",
@@ -160,6 +161,7 @@ def run_one(
         and process.returncode == 0
         and report.get("reconciliation", {}).get("passed", True)
         and report.get("winnerInvariantPassed", True)
+        and report.get("metricsComplete") is True
     )
     report["benchmark"] = {
         "scenario": scenario_name,
@@ -197,6 +199,9 @@ def main() -> int:
                         help="identities rotated by load_test; set high enough to avoid rate limiting")
     parser.add_argument("--workers", type=int, default=1000,
                         help="maximum Python worker threads for multi-order runs")
+    parser.add_argument("--rate-limit-enabled", choices=["true", "false"],
+                        default=os.getenv("RATE_LIMIT_ENABLED", "false"),
+                        help="application grab rate limiter setting for the disposable benchmark environment")
     args = parser.parse_args()
 
     if not args.test_environment:

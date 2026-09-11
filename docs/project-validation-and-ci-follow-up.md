@@ -1,4 +1,4 @@
-# Campus Errand Grab 接下来要做的任务
+# Campus Errand Grab 项目验收与 CI 后续任务
 
 ## 1. 目标
 
@@ -31,7 +31,7 @@
 
 本轮本地验收已经完成：
 
-- Docker Desktop、WSL2 和 Docker Engine 可用；空 Maven 缓存构建和完整测试已连续三次通过，每次 47 个测试、0 失败、0 错误、0 跳过。
+- Docker Desktop、WSL2 和 Docker Engine 可用；临时空 Maven 仓库构建和完整测试已连续三次通过，每次 53 个测试、0 失败、0 错误、0 跳过。
 - Compose、Flyway、冒烟流程和 readiness/liveness 证据已写入 `reports/runtime/`。
 - Redis、Outbox、重复结算和对账漂移四类故障脚本均有成功报告，索引见 `reports/failure-tests/index.md`。
 - Prometheus 指标、Grafana 数据源/面板、DEAD/对账/队列告警均已实际验证并恢复；证据见 `reports/monitoring/`。
@@ -421,9 +421,9 @@ reports/benchmarks/
 
 建议下一次开发只处理以下四项，不同时开始压测：
 
-- [ ] N1：在 Docker 环境中连续运行收紧后的送达与超时竞态测试。
-- [ ] N2：在 Docker 环境中运行已接入真实业务的 Toxiproxy 断连和超时测试。
-- [ ] N3：在 Docker 环境中运行已拆分事务的 Outbox 多实例和崩溃恢复测试。
-- [ ] N4：在 Docker 环境中运行已加入的 JWT/RBAC Web 集成测试。
+- [x] N1：在 Docker 环境中连续运行收紧后的送达与超时竞态测试。
+- [x] N2：在 Docker 环境中运行已接入真实业务的 Toxiproxy 断连和超时测试。
+- [x] N3：在 Docker 环境中运行已拆分事务的 Outbox 多实例和崩溃恢复测试。
+- [x] N4：在 Docker 环境中运行已加入的 JWT/RBAC Web 集成测试。
 
 完成后统一执行 `mvn clean verify`。只有 P0 全部通过，才能进入 Compose、监控和正式压测阶段。

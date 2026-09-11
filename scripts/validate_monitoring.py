@@ -126,12 +126,17 @@ def main() -> int:
     parser.add_argument("--base", default=os.getenv("BASE_URL", "http://127.0.0.1:8080"))
     parser.add_argument("--prometheus", default=os.getenv("PROMETHEUS_URL", "http://127.0.0.1:9090"))
     parser.add_argument("--grafana", default=os.getenv("GRAFANA_URL", "http://127.0.0.1:3000"))
+    parser.add_argument("--grafana-username", default=os.getenv("GRAFANA_ADMIN_USER", "admin"))
+    parser.add_argument("--grafana-password", default=os.getenv("GRAFANA_ADMIN_PASSWORD", "change-me-grafana"))
     parser.add_argument("--mysql-container", default="campus-errand-grab-mysql-1")
     parser.add_argument("--redis-container", default="campus-errand-grab-redis-1")
     parser.add_argument("--admin-username", default=os.getenv("ADMIN_USERNAME", "admin"))
     parser.add_argument("--admin-password", default=os.getenv("ADMIN_PASSWORD", "change-me-admin"))
     parser.add_argument("--output", default=str(DEFAULT_OUTPUT))
-    parser.add_argument("--alert-timeout", type=int, default=240)
+    parser.add_argument(
+        "--alert-timeout", type=int, default=420,
+        help="Maximum seconds to wait for each alert state; must exceed the longest rule lookback window.",
+    )
     args = parser.parse_args()
 
     output = Path(args.output)
@@ -162,8 +167,9 @@ def main() -> int:
         targets = get_json(prometheus + "/api/v1/targets")
         rules = get_json(prometheus + "/api/v1/rules")
         grafana_health = get_json(grafana + "/api/health")
-        grafana_datasources = get_json(grafana + "/api/datasources", auth=("admin", "admin"))
-        grafana_search = get_json(grafana + "/api/search", auth=("admin", "admin"))
+        grafana_auth = (args.grafana_username, args.grafana_password)
+        grafana_datasources = get_json(grafana + "/api/datasources", auth=grafana_auth)
+        grafana_search = get_json(grafana + "/api/search", auth=grafana_auth)
 
         result["wiring"] = {
             "metricsPresent": sorted(EXPECTED_METRICS & names),

@@ -10,3 +10,6 @@ __pycache__/
 .pytest_cache/
 *.pyc
 *.tmp
+
+# Local session handoff notes, not project documentation
+HANDOFF.md

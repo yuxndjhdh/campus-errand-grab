@@ -17,6 +17,7 @@ from requests.adapters import HTTPAdapter
 
 
 _thread_local = threading.local()
+METRIC_FIELDS = ("grabDbCas", "redisFiltered", "rateLimited", "grabAttempts", "grabWinners")
 
 
 def http_session():
@@ -68,7 +69,9 @@ def register_and_login(base, prefix):
 
 
 def admin_token(base):
-    password = os.environ["ADMIN_PASSWORD"]
+    password = os.getenv("ADMIN_PASSWORD", "change-me-admin")
+    if not password:
+        raise RuntimeError("ADMIN_PASSWORD is empty; set it to the Compose administrator password")
     status, payload, _ = post(base, "/api/auth/login", {
         "username": os.getenv("ADMIN_USERNAME", "admin"), "password": password,
     })
@@ -82,6 +85,63 @@ def admin_stats(base):
     if status != 200:
         raise RuntimeError(f"admin stats failed: {status} {payload}")
     return payload["data"]
+
+
+def capture_metrics(base):
+    """Capture the counters needed to explain database and Redis pressure."""
+    try:
+        stats = admin_stats(base)
+        missing = [field for field in METRIC_FIELDS
+                   if isinstance(stats.get(field), bool) or not isinstance(stats.get(field), (int, float))]
+        if missing:
+            return {
+                "status": "collection_failed",
+                "reason": "admin stats response is missing numeric fields: " + ", ".join(missing),
+                "missingFields": missing,
+            }
+        return {
+            "status": "complete",
+            "values": {field: int(stats[field]) for field in METRIC_FIELDS},
+        }
+    except (KeyError, RuntimeError, TypeError, ValueError, requests.RequestException) as exc:
+        return {
+            "status": "collection_failed",
+            "reason": f"{type(exc).__name__}: {str(exc)[:300]}",
+        }
+
+
+def attach_metric_delta(report, before, after):
+    """Attach a traceable metric state without turning an unavailable value into zero."""
+    if before.get("status") == "complete" and after.get("status") == "complete":
+        before_values = before["values"]
+        after_values = after["values"]
+        deltas = {field: after_values[field] - before_values[field] for field in METRIC_FIELDS}
+        negative = [field for field, value in deltas.items() if value < 0]
+        if not negative:
+            report["metrics"] = {
+                "status": "complete",
+                "fields": list(METRIC_FIELDS),
+                "before": before_values,
+                "after": after_values,
+                "delta": deltas,
+            }
+            report["metricsComplete"] = True
+            report["dbCasDelta"] = deltas["grabDbCas"]
+            report["redisFilteredDelta"] = deltas["redisFiltered"]
+            report["rateLimitedDelta"] = deltas["rateLimited"]
+            report["grabAttemptsDelta"] = deltas["grabAttempts"]
+            report["grabWinnersDelta"] = deltas["grabWinners"]
+            return
+        reason = "counter reset detected while calculating deltas: " + ", ".join(negative)
+    else:
+        failures = []
+        for phase, snapshot in (("before", before), ("after", after)):
+            if snapshot.get("status") != "complete":
+                failures.append(f"{phase}: {snapshot.get('reason', 'unknown collection failure')}")
+        reason = "; ".join(failures) or "metric snapshots were incomplete"
+    report["metrics"] = {"status": "collection_failed", "reason": reason}
+    report["metricsComplete"] = False
+    report["metricsUnavailable"] = {"status": "collection_failed", "reason": reason}
 
 
 def admin_reconciliation(base):
@@ -127,12 +187,12 @@ def burst(base, clients, taker_count):
         barrier.wait()
         return post(base, f"/api/orders/{order_id}/grab", token=taker_tokens[index % len(taker_tokens)])
 
-    before = admin_stats(base)
+    before = capture_metrics(base)
     started = time.perf_counter()
     with ThreadPoolExecutor(max_workers=clients) as pool:
         results = list(pool.map(call, range(clients)))
     duration_ms = (time.perf_counter() - started) * 1000
-    after = admin_stats(base)
+    after = capture_metrics(base)
     latencies = sorted(item[2] for item in results)
     successes = sum(1 for status, payload, _ in results if status == 200 and payload.get("data", {}).get("won"))
     reconciliation = admin_reconciliation(base)
@@ -144,11 +204,9 @@ def burst(base, clients, taker_count):
         "httpStatusCounts": dict(Counter(str(item[0]) for item in results)),
         "businessRejectionCounts": business_rejection_counts(results),
         "httpSystemErrorRate": http_system_error_rate(results),
-        "dbCasDelta": after["grabDbCas"] - before["grabDbCas"],
-        "redisFilteredDelta": after["redisFiltered"] - before["redisFiltered"],
-        "rateLimitedDelta": after["rateLimited"] - before["rateLimited"],
         "reconciliation": reconciliation,
     }
+    attach_metric_delta(report, before, after)
     print(json.dumps(report, indent=2))
     return report
 
@@ -165,6 +223,7 @@ def mixed(base, orders_count, clients_per_order, taker_count, workers):
             raise RuntimeError(f"order creation failed: {response}")
         orders.append(response[1]["data"]["id"])
     contenders = orders_count * clients_per_order
+    before = capture_metrics(base)
     started = time.perf_counter()
     with ThreadPoolExecutor(max_workers=min(contenders, workers)) as pool:
         futures = [pool.submit(post, base, f"/api/orders/{order}/grab", None,
@@ -172,6 +231,7 @@ def mixed(base, orders_count, clients_per_order, taker_count, workers):
                    for index, order in enumerate(order for order in orders for _ in range(clients_per_order))]
         results = [future.result() for future in futures]
     duration_ms = (time.perf_counter() - started) * 1000
+    after = capture_metrics(base)
     successes = sum(1 for status, payload, _ in results if status == 200 and payload.get("data", {}).get("won"))
     reconciliation = admin_reconciliation(base)
     report = {"scenario": "mixed", "orders": orders_count, "clientsPerOrder": clients_per_order,
@@ -182,9 +242,10 @@ def mixed(base, orders_count, clients_per_order, taker_count, workers):
               "throughputRps": len(results) / (duration_ms / 1000),
               "latencyMs": latency_summary(sorted(item[2] for item in results)),
               "httpStatusCounts": dict(Counter(str(item[0]) for item in results)),
-              "businessRejectionCounts": business_rejection_counts(results),
-              "httpSystemErrorRate": http_system_error_rate(results),
-              "reconciliation": reconciliation}
+               "businessRejectionCounts": business_rejection_counts(results),
+               "httpSystemErrorRate": http_system_error_rate(results),
+               "reconciliation": reconciliation}
+    attach_metric_delta(report, before, after)
     print(json.dumps(report, indent=2))
     return report
 
@@ -202,6 +263,7 @@ def sustained(base, duration_seconds, clients_per_order, taker_count, workers, i
     winner_count = 0
     settled_count = 0
 
+    before = capture_metrics(base)
     with ThreadPoolExecutor(max_workers=min(clients_per_order, workers)) as pool:
         while time.monotonic() < deadline:
             order = post(base, "/api/orders", {
@@ -250,6 +312,7 @@ def sustained(base, duration_seconds, clients_per_order, taker_count, workers, i
                 time.sleep(interval_ms / 1000)
 
     duration_ms = (time.perf_counter() - started) * 1000
+    after = capture_metrics(base)
     reconciliation = admin_reconciliation(base)
     report = {
         "scenario": "sustained",
@@ -270,6 +333,7 @@ def sustained(base, duration_seconds, clients_per_order, taker_count, workers, i
         "sampleOrders": order_reports[:20],
         "reconciliation": reconciliation,
     }
+    attach_metric_delta(report, before, after)
     print(json.dumps(report, indent=2))
     return report
 
@@ -344,18 +408,20 @@ def main():
                            workers=args.workers, interval_ms=args.interval_ms)
     else:
         report = invariants(args.base)
-    report["passed"] = (
+    report["functionalPassed"] = (
         report.get("reconciliation", {}).get("passed", True) is True
         and report.get("winnerInvariantPassed", True) is True
         and report.get("httpSystemErrorRate", 0) == 0
+    )
+    report["passed"] = report["functionalPassed"] and (
+        args.phase == "invariants" or report.get("metricsComplete") is True
     )
     path = args.output or os.path.join("reports", f"load-{args.phase}-{time.strftime('%Y%m%d-%H%M%S')}.json")
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     with open(path, "w", encoding="utf-8") as output:
         json.dump(report, output, ensure_ascii=True, indent=2)
     print(f"raw_report={path}")
-    if (report.get("reconciliation", {}).get("passed") is False
-            or report.get("winnerInvariantPassed") is False):
+    if not report["passed"]:
         return 1
     return 0
 
