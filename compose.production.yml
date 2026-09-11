@@ -1,0 +1,21 @@
+services:
+  mysql:
+    ports: []
+
+  redis:
+    ports: []
+
+  app:
+    ports: []
+    environment:
+      SPRING_PROFILES_ACTIVE: production
+      MANAGEMENT_PORT: "8081"
+      REQUIRE_REDIS_PASSWORD: "true"
+
+  prometheus:
+    ports: []
+    volumes:
+      - ./ops/prometheus-production.yml:/etc/prometheus/prometheus.yml:ro
+
+  grafana:
+    ports: []
