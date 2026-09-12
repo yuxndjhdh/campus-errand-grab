@@ -4,7 +4,7 @@
 
 ## 技术栈
 
-- Java 21、Spring Boot 3.3.6、JdbcTemplate、MySQL 8.4、Redis 7、Flyway
+- Java 21、Spring Boot 3.5.16、JdbcTemplate、MySQL 8.4、Redis 7、Flyway
 - Spring Security、BCrypt、HMAC-SHA256 JWT、RBAC
 - Micrometer、Actuator、Prometheus、Grafana
 - JUnit 5、Testcontainers、MySQL/Redis 真实集成测试

@@ -16,7 +16,7 @@
 
 项目目前已经具备以下能力：
 
-- Java 21、Spring Boot 3.3、JdbcTemplate、MySQL 8、Redis、Flyway。
+- Java 21、Spring Boot 3.5、JdbcTemplate、MySQL 8、Redis、Flyway。
 - 使用 MySQL 条件更新保证并发抢单只有一个赢家。
 - 使用 Redis Lua 对热点抢单流量进行前置过滤。
 - 使用 AVAILABLE/FROZEN 账户和复式分录处理资金托管、退款与结算。
