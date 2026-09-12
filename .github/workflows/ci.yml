@@ -35,7 +35,7 @@ jobs:
       - name: Dependency and secret vulnerability scan
         id: trivy_fs
         continue-on-error: true
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.28.0
         with:
           scan-type: fs
           scan-ref: .
@@ -48,7 +48,7 @@ jobs:
       - name: Container vulnerability scan
         id: trivy_image
         continue-on-error: true
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.28.0
         with:
           image-ref: campus-errand-grab:ci
           scanners: vuln
