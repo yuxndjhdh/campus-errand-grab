@@ -37,6 +37,9 @@ public class ProductionSecurityValidator implements ApplicationRunner {
         if (properties.getSecurity().isRequireRedisPassword()) {
             requireSecret("REDIS_PASSWORD", redisPassword, 12);
         }
+        if (properties.getPayment().isEnabled()) {
+            requireSecret("PAYMENT_WEBHOOK_SECRET", properties.getPayment().getWebhookSecret(), 32);
+        }
     }
 
     static void requireSecret(String name, String value, int minimumBytes) {

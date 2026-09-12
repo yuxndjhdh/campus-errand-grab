@@ -41,6 +41,17 @@ class JwtServiceTest {
         assertFalse(service.parse(expired).isPresent());
     }
 
+    @Test
+    void oldKeyIsRejectedAfterRotationWindowIsClosed() {
+        GrabProperties oldProperties = properties("old-secret-that-is-long-enough-for-tests");
+        String oldToken = new JwtService(oldProperties, objectMapper)
+                .issue(new User(7, "test", "USER", "rotation-expiry-user"));
+
+        GrabProperties rotatedProperties = properties("current-secret-that-is-long-enough-for-tests");
+        JwtService rotatedService = new JwtService(rotatedProperties, objectMapper);
+        assertFalse(rotatedService.parse(oldToken).isPresent());
+    }
+
     private GrabProperties properties(String secret) {
         GrabProperties properties = new GrabProperties();
         properties.getSecurity().setJwtSecret(secret);
