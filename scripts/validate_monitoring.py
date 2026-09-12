@@ -22,11 +22,15 @@ EXPECTED_METRICS = {
     "grab_db_cas_total",
     "grab_winner_total",
     "settlement_retry_total",
+    "settlement_dead",
+    "redis_degraded_total",
     "outbox_pending",
     "outbox_dead",
     "timeout_queue_lag_seconds",
     "recon_failure_total",
     "recon_last_success_timestamp",
+    "redis_lua_in_flight",
+    "redis_lua_concurrency_max",
 }
 
 
@@ -53,6 +57,26 @@ def docker_exec(container: str, args: list[str], env: dict[str, str] | None = No
     command.extend([container, *args])
     result = subprocess.run(command, cwd=ROOT, capture_output=True, text=True, check=True)
     return result.stdout.strip()
+
+
+def docker_control(container: str, action: str) -> None:
+    result = subprocess.run(["docker", action, container], cwd=ROOT, capture_output=True, text=True, check=False)
+    if result.returncode != 0:
+        raise RuntimeError(f"docker {action} {container} failed: {result.stderr[-500:]}")
+
+
+def wait_healthy(container: str, timeout: int = 60) -> float:
+    started = time.monotonic()
+    deadline = started + timeout
+    while time.monotonic() < deadline:
+        result = subprocess.run(
+            ["docker", "inspect", "--format", "{{.State.Health.Status}}", container],
+            cwd=ROOT, capture_output=True, text=True, check=False,
+        )
+        if result.returncode == 0 and result.stdout.strip() == "healthy":
+            return round(time.monotonic() - started, 3)
+        time.sleep(2)
+    raise TimeoutError(f"container {container} did not become healthy")
 
 
 def sql(container: str, statement: str) -> str:
@@ -155,6 +179,7 @@ def main() -> int:
         "sensitiveValuesExcluded": True,
     }
     cleanup: list[str] = []
+    redis_stopped = False
 
     try:
         metrics_text = requests.get(base + "/actuator/prometheus", timeout=15).text
@@ -198,12 +223,16 @@ def main() -> int:
             f"VALUES ('MONITOR_DEAD',{dead_biz_id},'{{}}','DEAD',12,'monitoring validation')"
         ))
         cleanup.append(f"DELETE FROM t_outbox_event WHERE event_type='MONITOR_DEAD' AND biz_id={dead_biz_id}")
+        dead_injected_at = utc_now()
         fired = wait_for_alert(args.prometheus, "CampusErrandOutboxDead", "firing", args.alert_timeout)
         alert_results.append({"alert": "CampusErrandOutboxDead", "fired": fired})
+        dead_repaired_at = utc_now()
         sql(args.mysql_container, cleanup.pop())
         alert_results[-1]["resolved"] = wait_for_alert(
             args.prometheus, "CampusErrandOutboxDead", "inactive", args.alert_timeout
         )
+        alert_results[-1]["injectedAt"] = dead_injected_at
+        alert_results[-1]["repairedAt"] = dead_repaired_at
 
         account_before = int(sql(
             args.mysql_container,
@@ -213,12 +242,14 @@ def main() -> int:
         cleanup.append(
             f"UPDATE t_account SET balance_cents={account_before} WHERE user_id=1 AND account_type='AVAILABLE'"
         )
+        recon_injected_at = utc_now()
         recon_failure = recon(args.base, token)
         if recon_failure.get("passed") is not False:
             raise RuntimeError("reconciliation drift injection did not fail")
         fired = wait_for_alert(args.prometheus, "CampusErrandReconFailure", "firing", args.alert_timeout)
         alert_results.append({"alert": "CampusErrandReconFailure", "fired": fired,
                               "reconciliationDuringFault": recon_failure})
+        recon_repaired_at = utc_now()
         sql(args.mysql_container, cleanup.pop())
         recon_recovered = recon(args.base, token)
         if recon_recovered.get("passed") is not True:
@@ -226,18 +257,133 @@ def main() -> int:
         alert_results[-1]["resolved"] = wait_for_alert(
             args.prometheus, "CampusErrandReconFailure", "inactive", args.alert_timeout
         )
+        alert_results[-1]["injectedAt"] = recon_injected_at
+        alert_results[-1]["repairedAt"] = recon_repaired_at
 
         invalid_member = f"CLAIM:monitor-invalid-{int(time.time())}"
         past_ms = int(time.time() * 1000) - 120_000
         docker_exec(args.redis_container, ["redis-cli", "ZADD", "delay:claim", str(past_ms), invalid_member])
         cleanup.append(f"redis-cli ZREM delay:claim {invalid_member}")
+        timeout_injected_at = utc_now()
         fired = wait_for_alert(args.prometheus, "CampusErrandTimeoutQueueLagHigh", "firing", args.alert_timeout)
         alert_results.append({"alert": "CampusErrandTimeoutQueueLagHigh", "fired": fired})
+        timeout_repaired_at = utc_now()
         docker_exec(args.redis_container, ["redis-cli", "ZREM", "delay:claim", invalid_member])
         cleanup.pop()
         alert_results[-1]["resolved"] = wait_for_alert(
             args.prometheus, "CampusErrandTimeoutQueueLagHigh", "inactive", args.alert_timeout
         )
+        alert_results[-1]["injectedAt"] = timeout_injected_at
+        alert_results[-1]["repairedAt"] = timeout_repaired_at
+
+        redis_suffix = str(time.time_ns())
+        publisher_name = f"monitoring-redis-publisher-{redis_suffix}"
+        taker_name = f"monitoring-redis-taker-{redis_suffix}"
+        publisher_password = "monitoring-publisher-password"
+        taker_password = "monitoring-taker-password"
+        post_json(base + "/api/auth/register", {
+            "username": publisher_name, "nickname": publisher_name, "password": publisher_password,
+        })
+        post_json(base + "/api/auth/register", {
+            "username": taker_name, "nickname": taker_name, "password": taker_password,
+        })
+        publisher_token = admin_token(base, publisher_name, publisher_password)
+        taker_token = admin_token(base, taker_name, taker_password)
+        recharge_key = f"monitoring-redis-recharge-{redis_suffix}"
+        mint_available_before = int(sql(
+            args.mysql_container,
+            "SELECT balance_cents FROM t_account WHERE user_id=1 AND account_type='AVAILABLE'",
+        ))
+        post_json(base + "/api/users/me/recharge", {"amountCents": 5000, "idemKey": recharge_key},
+                  headers={"Authorization": f"Bearer {publisher_token}"})
+        order_payload = post_json(base + "/api/orders", {
+            "title": "monitoring redis degraded", "rewardCents": 1000, "claimTtlSeconds": 120,
+        }, headers={"Authorization": f"Bearer {publisher_token}"})
+        redis_order_id = int(order_payload["data"]["id"])
+        publisher_id = int(sql(args.mysql_container,
+                               f"SELECT id FROM t_user WHERE username='{publisher_name}'"))
+        taker_id = int(sql(args.mysql_container,
+                           f"SELECT id FROM t_user WHERE username='{taker_name}'"))
+        recharge_biz_id = int(sql(
+            args.mysql_container,
+            f"SELECT biz_id FROM t_ledger_entry WHERE biz_type='RECHARGE' AND user_id={publisher_id} "
+            "ORDER BY id DESC LIMIT 1",
+        ))
+        cleanup.append(
+            "START TRANSACTION; "
+            f"DELETE FROM t_outbox_event WHERE biz_id={redis_order_id}; "
+            f"DELETE FROM t_ledger_entry WHERE user_id IN ({publisher_id},{taker_id}); "
+            f"DELETE FROM t_ledger_entry WHERE biz_type='RECHARGE' AND biz_id={recharge_biz_id}; "
+            f"DELETE FROM t_idempotent_op WHERE op_key='{recharge_key}'; "
+            f"DELETE FROM t_errand_order WHERE id={redis_order_id}; "
+            f"DELETE FROM t_account WHERE user_id IN ({publisher_id},{taker_id}); "
+            f"UPDATE t_account SET balance_cents={mint_available_before} WHERE user_id=1 AND account_type='AVAILABLE'; "
+            f"DELETE FROM t_user WHERE id IN ({publisher_id},{taker_id}); "
+            "COMMIT;"
+        )
+        docker_control(args.redis_container, "stop")
+        redis_stopped = True
+        redis_outage_started_at = utc_now()
+        grab_result = post_json(base + f"/api/orders/{redis_order_id}/grab", {},
+                                headers={"Authorization": f"Bearer {taker_token}"})
+        if grab_result.get("data", {}).get("won") is not True:
+            raise RuntimeError(f"Redis fallback grab did not win: {grab_result}")
+        redis_fired = wait_for_alert(args.prometheus, "CampusErrandRedisDegraded", "firing", args.alert_timeout)
+        docker_control(args.redis_container, "start")
+        redis_recovery_seconds = wait_healthy(args.redis_container)
+        redis_stopped = False
+        redis_repaired_at = utc_now()
+        post_json(base + f"/api/orders/{redis_order_id}/cancel", {},
+                  headers={"Authorization": f"Bearer {publisher_token}"})
+        redis_result = {
+            "alert": "CampusErrandRedisDegraded",
+            "fired": redis_fired,
+            "injectedAt": redis_outage_started_at,
+            "repairedAt": redis_repaired_at,
+            "redisRecoverySeconds": redis_recovery_seconds,
+            "fallbackGrabWon": True,
+        }
+        redis_result["resolved"] = wait_for_alert(
+            args.prometheus, "CampusErrandRedisDegraded", "inactive", args.alert_timeout
+        )
+        alert_results.append(redis_result)
+
+        dead_marker = f"monitoring-settlement-dead-{time.time_ns()}"
+        dead_ledger_biz_id = int(time.time() * 1000) + 1
+        mint_available = int(sql(args.mysql_container,
+                                 "SELECT balance_cents FROM t_account WHERE user_id=1 AND account_type='AVAILABLE'"))
+        mint_frozen = int(sql(args.mysql_container,
+                              "SELECT balance_cents FROM t_account WHERE user_id=1 AND account_type='FROZEN'"))
+        sql(args.mysql_container, (
+            "INSERT INTO t_errand_order(publisher_id,taker_id,title,reward_cents,status,claim_deadline_at,"
+            "deliver_deadline_at,delivered_at,settlement_retry_count,settlement_dead,settlement_last_error) "
+            f"VALUES (1,2,'{dead_marker}',1,'DELIVERED',DATE_ADD(NOW(3),INTERVAL 1 HOUR),"
+            f"DATE_ADD(NOW(3),INTERVAL 1 HOUR),NOW(3),12,1,'monitoring validation'); "
+            f"UPDATE t_account SET balance_cents={mint_available - 1} WHERE user_id=1 AND account_type='AVAILABLE'; "
+            f"UPDATE t_account SET balance_cents={mint_frozen + 1} WHERE user_id=1 AND account_type='FROZEN'; "
+            f"INSERT INTO t_ledger_entry(biz_type,biz_id,user_id,account_type,amount_cents) VALUES "
+            f"('MONITOR_SETTLEMENT_DEAD',{dead_ledger_biz_id},1,'AVAILABLE',-1),"
+            f"('MONITOR_SETTLEMENT_DEAD',{dead_ledger_biz_id},1,'FROZEN',1)"
+        ))
+        dead_order_id = int(sql(args.mysql_container,
+                                f"SELECT id FROM t_errand_order WHERE title='{dead_marker}'"))
+        cleanup.append(
+            f"DELETE FROM t_ledger_entry WHERE biz_type='MONITOR_SETTLEMENT_DEAD' AND biz_id={dead_ledger_biz_id}; "
+            f"UPDATE t_account SET balance_cents={mint_available} WHERE user_id=1 AND account_type='AVAILABLE'; "
+            f"UPDATE t_account SET balance_cents={mint_frozen} WHERE user_id=1 AND account_type='FROZEN'; "
+            f"DELETE FROM t_errand_order WHERE id={dead_order_id}"
+        )
+        settlement_injected_at = utc_now()
+        fired = wait_for_alert(args.prometheus, "CampusErrandSettlementRetryExhausted", "firing", args.alert_timeout)
+        settlement_result = {"alert": "CampusErrandSettlementRetryExhausted", "fired": fired,
+                             "injectedAt": settlement_injected_at}
+        settlement_repaired_at = utc_now()
+        sql(args.mysql_container, cleanup.pop())
+        settlement_result["repairedAt"] = settlement_repaired_at
+        settlement_result["resolved"] = wait_for_alert(
+            args.prometheus, "CampusErrandSettlementRetryExhausted", "inactive", args.alert_timeout
+        )
+        alert_results.append(settlement_result)
 
         result["alerts"] = alert_results
         result["finishedAt"] = utc_now()
@@ -246,6 +392,12 @@ def main() -> int:
         result["error"] = str(exc)
         result["finishedAt"] = utc_now()
     finally:
+        if redis_stopped:
+            try:
+                docker_control(args.redis_container, "start")
+                wait_healthy(args.redis_container)
+            except Exception:
+                pass
         for statement in reversed(cleanup):
             try:
                 if statement.startswith("redis-cli "):

@@ -8,6 +8,8 @@ import argparse
 from collections import Counter
 import json
 import os
+import re
+import subprocess
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -18,6 +20,59 @@ from requests.adapters import HTTPAdapter
 
 _thread_local = threading.local()
 METRIC_FIELDS = ("grabDbCas", "redisFiltered", "rateLimited", "grabAttempts", "grabWinners")
+PROMETHEUS_SAMPLE = re.compile(
+    r"^([a-zA-Z_:][a-zA-Z0-9_:]*)(\{[^}]*\})?\s+([-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?)$"
+)
+RUNTIME_METRIC_NAMES = {
+    "redis_lua_calls_total",
+    "redis_lua_success_total",
+    "redis_lua_failure_total",
+    "redis_lua_duration_seconds",
+    "redis_lua_duration_seconds_count",
+    "redis_lua_duration_seconds_sum",
+    "redis_lua_duration_seconds_max",
+    "redis_lua_in_flight",
+    "redis_lua_concurrency_max",
+    "grab_db_cas_duration_seconds_count",
+    "grab_db_cas_duration_seconds_sum",
+    "grab_db_cas_duration_seconds_max",
+    "grab_db_cas_duration_seconds",
+    "hikaricp_connections_active",
+    "hikaricp_connections_idle",
+    "hikaricp_connections_pending",
+    "hikaricp_connections_max",
+    "hikaricp_connections_min",
+    "hikaricp_connections_acquire_seconds_count",
+    "hikaricp_connections_acquire_seconds_sum",
+    "hikaricp_connections_acquire_seconds_max",
+    "jvm_gc_pause_seconds_count",
+    "jvm_gc_pause_seconds_sum",
+    "jvm_gc_pause_seconds_max",
+    "jvm_threads_live_threads",
+    "jvm_threads_peak_threads",
+    "jvm_threads_daemon_threads",
+    "jvm_threads_states_threads",
+    "jvm_memory_used_bytes",
+    "jvm_memory_committed_bytes",
+    "jvm_memory_max_bytes",
+    "process_cpu_usage",
+    "process_uptime_seconds",
+    "system_cpu_usage",
+    "system_load_average_1m",
+    "executor_active_threads",
+    "executor_queued_tasks",
+    "executor_pool_size",
+    "executor_completed_tasks",
+}
+RUNTIME_AGGREGATE_NAMES = {
+    "jvm_gc_pause_seconds_count",
+    "jvm_gc_pause_seconds_sum",
+    "jvm_gc_pause_seconds_max",
+    "jvm_threads_states_threads",
+    "jvm_memory_used_bytes",
+    "jvm_memory_committed_bytes",
+    "jvm_memory_max_bytes",
+}
 
 
 def http_session():
@@ -53,6 +108,167 @@ def get(base, path, token=None, timeout=10):
     except ValueError:
         payload = {"code": "INVALID_JSON"}
     return response.status_code, payload, elapsed
+
+
+def parse_prometheus_metrics(text):
+    """Keep a low-cardinality allow-list from the application's Prometheus scrape."""
+    values = {}
+    for line in text.splitlines():
+        if not line or line.startswith("#"):
+            continue
+        match = PROMETHEUS_SAMPLE.match(line.strip())
+        if not match:
+            continue
+        name, labels, raw_value = match.groups()
+        if name not in RUNTIME_METRIC_NAMES:
+            continue
+        try:
+            value = float(raw_value)
+        except ValueError:
+            continue
+        if name in RUNTIME_AGGREGATE_NAMES:
+            key = name
+        elif labels:
+            key = f"{name}[{labels[1:-1].replace(chr(34), '')}]"
+        else:
+            key = name
+        values[key] = values.get(key, 0.0) + value if name in RUNTIME_AGGREGATE_NAMES else value
+    return values
+
+
+def parse_percent(value):
+    try:
+        return float(str(value).rstrip("%"))
+    except (TypeError, ValueError):
+        return None
+
+
+def parse_bytes(value):
+    match = re.match(r"^\s*([0-9.]+)\s*([kmgtpe]?i?b)?\s*$", str(value), re.IGNORECASE)
+    if not match:
+        return None
+    number = float(match.group(1))
+    suffix = (match.group(2) or "b").lower()
+    units = {"b": 1, "kb": 1000, "mb": 1000**2, "gb": 1000**3, "tb": 1000**4,
+             "kib": 1024, "mib": 1024**2, "gib": 1024**3, "tib": 1024**4}
+    return int(number * units.get(suffix, 1))
+
+
+def capture_container_resources():
+    """Capture best-effort Docker CPU and memory facts without making them acceptance gates."""
+    try:
+        result = subprocess.run(
+            ["docker", "stats", "--no-stream", "--format", "{{json .}}"],
+            capture_output=True, text=True, timeout=5, check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return {"status": "collection_failed", "reason": f"{type(exc).__name__}: {exc}"}
+    if result.returncode != 0:
+        return {"status": "collection_failed", "reason": (result.stderr or result.stdout).strip()[:300]}
+    containers = {}
+    for line in result.stdout.splitlines():
+        try:
+            item = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        name = item.get("Name")
+        if not name:
+            continue
+        memory_usage = str(item.get("MemUsage", "")).split("/", 1)
+        containers[name] = {
+            "cpuPercent": parse_percent(item.get("CPUPerc")),
+            "memoryUsageBytes": parse_bytes(memory_usage[0]) if memory_usage else None,
+            "memoryLimitBytes": parse_bytes(memory_usage[1]) if len(memory_usage) > 1 else None,
+            "memoryPercent": parse_percent(item.get("MemPerc")),
+            "pids": int(item["PIDs"]) if str(item.get("PIDs", "")).isdigit() else None,
+        }
+    return {"status": "complete", "containers": containers}
+
+
+def capture_runtime_snapshot(base):
+    try:
+        response = http_session().get(base + "/actuator/prometheus", timeout=5)
+        if response.status_code != 200:
+            return {
+                "status": "collection_failed",
+                "reason": f"prometheus endpoint returned HTTP {response.status_code}",
+                "containerResources": capture_container_resources(),
+            }
+        values = parse_prometheus_metrics(response.text)
+        required_prefixes = ("redis_lua_calls_total", "redis_lua_duration_seconds_count", "grab_db_cas_duration_seconds_count")
+        if not any(any(key.startswith(prefix) for key in values) for prefix in required_prefixes):
+            return {
+                "status": "collection_failed",
+                "reason": "expected Redis Lua and DB CAS metrics were absent from Prometheus scrape",
+                "values": values,
+                "containerResources": capture_container_resources(),
+            }
+        return {
+            "status": "complete",
+            "values": values,
+            "containerResources": capture_container_resources(),
+        }
+    except requests.RequestException as exc:
+        return {
+            "status": "collection_failed",
+            "reason": f"{type(exc).__name__}: {str(exc)[:300]}",
+            "containerResources": capture_container_resources(),
+        }
+
+
+class RuntimeSampler:
+    def __init__(self, base, interval_seconds=2.0):
+        self.base = base
+        self.interval_seconds = interval_seconds
+        self.samples = []
+        self.stop_event = threading.Event()
+        self.thread = None
+
+    def start(self):
+        self._record()
+        self.thread = threading.Thread(target=self._run, name="runtime-metrics-sampler", daemon=True)
+        self.thread.start()
+
+    def _run(self):
+        while not self.stop_event.wait(self.interval_seconds):
+            self._record()
+
+    def _record(self):
+        snapshot = capture_runtime_snapshot(self.base)
+        snapshot["capturedAtEpochMs"] = int(time.time() * 1000)
+        self.samples.append(snapshot)
+
+    def stop(self):
+        self.stop_event.set()
+        if self.thread is not None:
+            self.thread.join(timeout=6)
+        self._record()
+        successful = [sample for sample in self.samples if sample.get("status") == "complete"]
+        aggregate = {}
+        for sample in successful:
+            for key, value in sample.get("values", {}).items():
+                aggregate.setdefault(key, []).append(value)
+        summary = {
+            key: {
+                "min": min(values),
+                "max": max(values),
+                "mean": sum(values) / len(values),
+                "first": values[0],
+                "last": values[-1],
+            }
+            for key, values in aggregate.items()
+        }
+        status = "complete" if successful and len(successful) == len(self.samples) else (
+            "partial" if successful else "collection_failed"
+        )
+        return {
+            "status": status,
+            "intervalSeconds": self.interval_seconds,
+            "sampleCount": len(self.samples),
+            "successfulSamples": len(successful),
+            "summary": summary,
+            "samples": self.samples,
+        }
 
 
 def register_and_login(base, prefix):
@@ -188,9 +404,12 @@ def burst(base, clients, taker_count):
         return post(base, f"/api/orders/{order_id}/grab", token=taker_tokens[index % len(taker_tokens)])
 
     before = capture_metrics(base)
+    sampler = RuntimeSampler(base)
+    sampler.start()
     started = time.perf_counter()
     with ThreadPoolExecutor(max_workers=clients) as pool:
         results = list(pool.map(call, range(clients)))
+    runtime_metrics = sampler.stop()
     duration_ms = (time.perf_counter() - started) * 1000
     after = capture_metrics(base)
     latencies = sorted(item[2] for item in results)
@@ -205,6 +424,7 @@ def burst(base, clients, taker_count):
         "businessRejectionCounts": business_rejection_counts(results),
         "httpSystemErrorRate": http_system_error_rate(results),
         "reconciliation": reconciliation,
+        "runtimeMetrics": runtime_metrics,
     }
     attach_metric_delta(report, before, after)
     print(json.dumps(report, indent=2))
@@ -224,12 +444,15 @@ def mixed(base, orders_count, clients_per_order, taker_count, workers):
         orders.append(response[1]["data"]["id"])
     contenders = orders_count * clients_per_order
     before = capture_metrics(base)
+    sampler = RuntimeSampler(base)
+    sampler.start()
     started = time.perf_counter()
     with ThreadPoolExecutor(max_workers=min(contenders, workers)) as pool:
         futures = [pool.submit(post, base, f"/api/orders/{order}/grab", None,
                                 taker_tokens[index % len(taker_tokens)])
                    for index, order in enumerate(order for order in orders for _ in range(clients_per_order))]
         results = [future.result() for future in futures]
+    runtime_metrics = sampler.stop()
     duration_ms = (time.perf_counter() - started) * 1000
     after = capture_metrics(base)
     successes = sum(1 for status, payload, _ in results if status == 200 and payload.get("data", {}).get("won"))
@@ -244,7 +467,8 @@ def mixed(base, orders_count, clients_per_order, taker_count, workers):
               "httpStatusCounts": dict(Counter(str(item[0]) for item in results)),
                "businessRejectionCounts": business_rejection_counts(results),
                "httpSystemErrorRate": http_system_error_rate(results),
-               "reconciliation": reconciliation}
+               "reconciliation": reconciliation,
+               "runtimeMetrics": runtime_metrics}
     attach_metric_delta(report, before, after)
     print(json.dumps(report, indent=2))
     return report
@@ -264,6 +488,8 @@ def sustained(base, duration_seconds, clients_per_order, taker_count, workers, i
     settled_count = 0
 
     before = capture_metrics(base)
+    sampler = RuntimeSampler(base)
+    sampler.start()
     with ThreadPoolExecutor(max_workers=min(clients_per_order, workers)) as pool:
         while time.monotonic() < deadline:
             order = post(base, "/api/orders", {
@@ -311,6 +537,7 @@ def sustained(base, duration_seconds, clients_per_order, taker_count, workers, i
             if interval_ms > 0:
                 time.sleep(interval_ms / 1000)
 
+    runtime_metrics = sampler.stop()
     duration_ms = (time.perf_counter() - started) * 1000
     after = capture_metrics(base)
     reconciliation = admin_reconciliation(base)
@@ -332,6 +559,7 @@ def sustained(base, duration_seconds, clients_per_order, taker_count, workers, i
         "winnerInvariantPassed": winner_count == len(order_reports),
         "sampleOrders": order_reports[:20],
         "reconciliation": reconciliation,
+        "runtimeMetrics": runtime_metrics,
     }
     attach_metric_delta(report, before, after)
     print(json.dumps(report, indent=2))
