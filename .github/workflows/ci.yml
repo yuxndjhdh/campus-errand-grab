@@ -22,10 +22,55 @@ jobs:
         run: mvn -B -s mvn-settings.xml verify
       - name: Repository safety scan
         run: python scripts/validate_repository_safety.py
+      - name: Validate Python evidence tooling and documentation
+        run: |
+          python -m py_compile scripts/load_test.py scripts/validate_documentation_consistency.py scripts/generate_runtime_benchmark_report.py
+          python scripts/validate_documentation_consistency.py
       - name: Validate compose file
         run: docker compose config
       - name: Build image
         run: docker build --tag campus-errand-grab:ci .
+      - name: Prepare security evidence directory
+        run: mkdir -p reports/security
+      - name: Dependency and secret vulnerability scan
+        id: trivy_fs
+        continue-on-error: true
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          scanners: vuln,secret
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          format: json
+          output: reports/security/dependency-scan.json
+          exit-code: '1'
+      - name: Container vulnerability scan
+        id: trivy_image
+        continue-on-error: true
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: campus-errand-grab:ci
+          scanners: vuln
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          format: json
+          output: reports/security/container-scan.json
+          exit-code: '1'
+      - name: Generate complete SBOM
+        id: sbom
+        uses: anchore/sbom-action@v0.17.0
+        with:
+          image: campus-errand-grab:ci
+          artifact-name: sbom.spdx.json
+          output-file: reports/security/sbom.spdx.json
+          format: spdx-json
+      - name: Enforce security scan gates
+        if: always()
+        run: |
+          if [ "${{ steps.trivy_fs.outcome }}" != "success" ]; then exit 1; fi
+          if [ "${{ steps.trivy_image.outcome }}" != "success" ]; then exit 1; fi
+          if [ "${{ steps.sbom.outcome }}" != "success" ]; then exit 1; fi
       - name: Upload reports
         if: always()
         uses: actions/upload-artifact@v4
@@ -34,3 +79,4 @@ jobs:
           path: |
             target/surefire-reports/
             target/site/jacoco/
+            reports/security/
