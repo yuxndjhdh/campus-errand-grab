@@ -29,14 +29,17 @@ public class GrabRateLimiter {
 
     public boolean allow(long userId, long orderId) {
         if (!properties.getGrab().isRateLimitEnabled()) return true;
+        long startedNanos = metrics.startRedisLua("grab_rate_limit");
         try {
             Long result = redis.execute(script,
                     List.of("rate:grab:user:" + userId, "rate:grab:order:" + orderId),
                     String.valueOf(properties.getGrab().getRateLimitPerUser()),
                     String.valueOf(properties.getGrab().getRateLimitPerOrder()),
                     String.valueOf(properties.getGrab().getRateLimitWindowSeconds()));
+            metrics.redisLuaSucceeded("grab_rate_limit", startedNanos);
             return result == null || result == 1L;
         } catch (DataAccessException ex) {
+            metrics.redisLuaFailed("grab_rate_limit", startedNanos);
             metrics.redisDegraded();
             log.warn("redis rate limiter unavailable; allowing request userId={} orderId={}", userId, orderId);
             return true;

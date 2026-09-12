@@ -23,9 +23,9 @@ public class OutboxRepository {
         LocalDateTime normalizedLockUntil = truncateToMillis(lockUntil);
         List<OutboxEvent> events = jdbc.query(
                 "SELECT id,event_type,biz_id,payload_json,status,retry_count,next_retry_at,locked_until,last_error,created_at " +
-                        "FROM t_outbox_event WHERE ((status IN ('PENDING','RETRY') AND next_retry_at<=?) " +
-                        "OR (status='PROCESSING' AND locked_until<=?)) ORDER BY id LIMIT ? FOR UPDATE SKIP LOCKED",
-                this::map, Timestamp.valueOf(now), Timestamp.valueOf(now), limit);
+                        "FROM t_outbox_event WHERE ((status IN ('PENDING','RETRY') AND next_retry_at<=CURRENT_TIMESTAMP(3)) " +
+                        "OR (status='PROCESSING' AND locked_until<=CURRENT_TIMESTAMP(3))) ORDER BY id LIMIT ? FOR UPDATE SKIP LOCKED",
+                this::map, limit);
         if (events.isEmpty()) return events;
         for (OutboxEvent event : events) {
             jdbc.update("UPDATE t_outbox_event SET status='PROCESSING',locked_until=? WHERE id=?",

@@ -1,6 +1,7 @@
 package com.yu.errand.security;
 
 import com.yu.errand.config.GrabProperties;
+import com.yu.errand.monitoring.ReliabilityMetrics;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataAccessException;
@@ -26,27 +27,32 @@ public class LoginAttemptGuard {
     private final StringRedisTemplate redis;
     private final DefaultRedisScript<Long> script;
     private final GrabProperties properties;
+    private final ReliabilityMetrics metrics;
     private final ConcurrentHashMap<String, Window> fallback = new ConcurrentHashMap<>();
 
     public LoginAttemptGuard(StringRedisTemplate redis,
                              @Qualifier("loginAttemptScript") DefaultRedisScript<Long> loginAttemptScript,
-                             GrabProperties properties) {
+                             GrabProperties properties, ReliabilityMetrics metrics) {
         this.redis = redis;
         this.script = loginAttemptScript;
         this.properties = properties;
+        this.metrics = metrics;
     }
 
     public boolean allow(String username, String remoteAddress) {
         String accountKey = accountKey(username);
         String ipKey = ipKey(remoteAddress);
+        long startedNanos = metrics.startRedisLua("login_attempt");
         try {
             Long result = redis.execute(script, List.of(accountKey, ipKey),
                     String.valueOf(properties.getSecurity().getLoginFailureLimit()),
                     String.valueOf(properties.getSecurity().getLoginIpFailureLimit()),
                     String.valueOf(properties.getSecurity().getLoginWindowSeconds()),
                     "0");
+            metrics.redisLuaSucceeded("login_attempt", startedNanos);
             return result == null || result == 1L;
         } catch (DataAccessException ex) {
+            metrics.redisLuaFailed("login_attempt", startedNanos);
             log.warn("login rate limiter unavailable; using local fallback");
             return fallbackAllow(accountKey, ipKey, System.currentTimeMillis());
         }
@@ -55,13 +61,16 @@ public class LoginAttemptGuard {
     public void recordFailure(String username, String remoteAddress) {
         String accountKey = accountKey(username);
         String ipKey = ipKey(remoteAddress);
+        long startedNanos = metrics.startRedisLua("login_attempt");
         try {
             redis.execute(script, List.of(accountKey, ipKey),
                     String.valueOf(properties.getSecurity().getLoginFailureLimit()),
                     String.valueOf(properties.getSecurity().getLoginIpFailureLimit()),
                     String.valueOf(properties.getSecurity().getLoginWindowSeconds()),
                     "1");
+            metrics.redisLuaSucceeded("login_attempt", startedNanos);
         } catch (DataAccessException ex) {
+            metrics.redisLuaFailed("login_attempt", startedNanos);
             log.warn("login failure counter unavailable; using local fallback");
             fallbackRecordFailure(accountKey, ipKey, System.currentTimeMillis());
         }

@@ -11,13 +11,13 @@ groups:
           description: One or more Outbox events require replay or manual intervention.
 
       - alert: CampusErrandReconFailure
-        expr: increase(recon_failure_total[5m]) > 0
+        expr: increase(recon_failure_total[1m]) > 0
         for: 1m
         labels:
           severity: critical
         annotations:
           summary: Financial reconciliation failed
-          description: At least one reconciliation run failed during the last five minutes.
+          description: At least one reconciliation run failed during the last minute.
 
       - alert: CampusErrandOutboxBacklogGrowing
         expr: deriv(outbox_pending[10m]) > 0
@@ -38,13 +38,22 @@ groups:
           description: The oldest observed due timeout event is more than thirty seconds late.
 
       - alert: CampusErrandRedisDegraded
-        expr: increase(redis_degraded_total[5m]) > 0
-        for: 5m
+        expr: increase(redis_degraded_total[1m]) > 0
+        for: 1m
         labels:
           severity: warning
         annotations:
           summary: Redis fallback path is active
-          description: Redis operations have degraded to the database-safe path during the last five minutes.
+          description: Redis operations have degraded to the database-safe path during the last minute.
+
+      - alert: CampusErrandSettlementRetryExhausted
+        expr: settlement_dead > 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: Settlement retries have been exhausted
+          description: One or more delivered orders require audited settlement recovery.
 
       - alert: CampusErrandHttp5xxHigh
         expr: |

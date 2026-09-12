@@ -5,6 +5,8 @@ import com.yu.errand.domain.model.ErrandOrder;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.support.GeneratedKeyHolder;
 import org.springframework.jdbc.support.KeyHolder;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
 import org.springframework.stereotype.Repository;
 
 import java.sql.PreparedStatement;
@@ -17,8 +19,15 @@ import java.util.Optional;
 @Repository
 public class OrderRepository {
     private final JdbcTemplate jdbc;
+    private final Timer grabDbCasTimer;
 
-    public OrderRepository(JdbcTemplate jdbc) { this.jdbc = jdbc; }
+    public OrderRepository(JdbcTemplate jdbc, MeterRegistry registry) {
+        this.jdbc = jdbc;
+        this.grabDbCasTimer = Timer.builder("grab_db_cas_duration")
+                .description("Duration of the MySQL conditional grab update")
+                .publishPercentiles(0.5, 0.95, 0.99)
+                .register(registry);
+    }
 
     public long insert(long publisherId, String title, String detail, long rewardCents, long claimTtlSeconds) {
         KeyHolder holder = new GeneratedKeyHolder();
@@ -52,10 +61,15 @@ public class OrderRepository {
     }
 
     public int claim(long orderId, long takerId, long deliverTtlSeconds) {
-        return jdbc.update("UPDATE t_errand_order SET status='TAKEN',taker_id=?,grabbed_at=NOW(3)," +
-                        "deliver_deadline_at=DATE_ADD(NOW(3), INTERVAL ? SECOND),version=version+1 " +
-                        "WHERE id=? AND status='PUBLISHED' AND taker_id IS NULL AND publisher_id<>? AND claim_deadline_at>NOW(3)",
-                takerId, deliverTtlSeconds, orderId, takerId);
+        long startedNanos = System.nanoTime();
+        try {
+            return jdbc.update("UPDATE t_errand_order SET status='TAKEN',taker_id=?,grabbed_at=NOW(3)," +
+                            "deliver_deadline_at=DATE_ADD(NOW(3), INTERVAL ? SECOND),version=version+1 " +
+                            "WHERE id=? AND status='PUBLISHED' AND taker_id IS NULL AND publisher_id<>? AND claim_deadline_at>NOW(3)",
+                    takerId, deliverTtlSeconds, orderId, takerId);
+        } finally {
+            grabDbCasTimer.record(System.nanoTime() - startedNanos, java.util.concurrent.TimeUnit.NANOSECONDS);
+        }
     }
 
     public boolean claimExpired(long orderId) {

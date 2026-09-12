@@ -58,9 +58,11 @@ public class GrabMarker {
     }
 
     public Decision tryPass(long orderId, long takerId, long nowMillis) {
+        long startedNanos = metrics.startRedisLua("grab_filter");
         try {
             Long result = redis.execute(filterScript, List.of(markerKey(orderId), knownKey(orderId)),
                     String.valueOf(nowMillis), String.valueOf(takerId));
+            metrics.redisLuaSucceeded("grab_filter", startedNanos);
             return switch (result == null ? -2 : result.intValue()) {
                 case 1 -> Decision.PASS;
                 case 0 -> Decision.FILTERED;
@@ -69,6 +71,7 @@ public class GrabMarker {
                 default -> Decision.MISSING;
             };
         } catch (DataAccessException ex) {
+            metrics.redisLuaFailed("grab_filter", startedNanos);
             metrics.redisDegraded();
             log.debug("redis marker filter unavailable for order {}", orderId);
             return Decision.UNAVAILABLE;
@@ -80,11 +83,14 @@ public class GrabMarker {
     }
 
     public void rearm(long orderId, LocalDateTime deadline, long publisherId) {
+        long startedNanos = metrics.startRedisLua("grab_marker_rearm");
         try {
             long seconds = Math.max(1, Duration.between(LocalDateTime.now(), deadline).getSeconds() + properties.getGrab().getMarkerTtlSlackSeconds());
             redis.execute(rearmScript, List.of(markerKey(orderId), knownKey(orderId)), String.valueOf(toMillis(deadline)),
                     String.valueOf(seconds), String.valueOf(publisherId));
+            metrics.redisLuaSucceeded("grab_marker_rearm", startedNanos);
         } catch (DataAccessException ex) {
+            metrics.redisLuaFailed("grab_marker_rearm", startedNanos);
             metrics.redisDegraded();
             log.debug("redis marker rearm failed for order {}", orderId, ex);
         }
