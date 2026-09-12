@@ -13,6 +13,7 @@ public class GrabProperties {
     private final Reliability reliability = new Reliability();
     private final Security security = new Security();
     private final Admin admin = new Admin();
+    private final Payment payment = new Payment();
 
     public Grab getGrab() { return grab; }
     public Order getOrder() { return order; }
@@ -21,6 +22,7 @@ public class GrabProperties {
     public Reliability getReliability() { return reliability; }
     public Security getSecurity() { return security; }
     public Admin getAdmin() { return admin; }
+    public Payment getPayment() { return payment; }
 
     public static class Grab {
         private boolean redisPrefilterEnabled = true;
@@ -107,5 +109,17 @@ public class GrabProperties {
         public void setUsername(String value) { username = value; }
         public String getPassword() { return password; }
         public void setPassword(String value) { password = value; }
+    }
+
+    public static class Payment {
+        private boolean enabled = true;
+        private String webhookSecret = "local-payment-webhook-secret";
+        private long webhookSkewSeconds = 300;
+        public boolean isEnabled() { return enabled; }
+        public void setEnabled(boolean value) { enabled = value; }
+        public String getWebhookSecret() { return webhookSecret; }
+        public void setWebhookSecret(String value) { webhookSecret = value; }
+        public long getWebhookSkewSeconds() { return webhookSkewSeconds; }
+        public void setWebhookSkewSeconds(long value) { webhookSkewSeconds = value; }
     }
 }

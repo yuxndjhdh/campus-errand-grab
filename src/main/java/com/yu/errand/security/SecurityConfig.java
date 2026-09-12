@@ -3,6 +3,7 @@ package com.yu.errand.security;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.yu.errand.common.ApiResponse;
 import com.yu.errand.common.ErrorCode;
+import com.yu.errand.monitoring.TraceIdFilter;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.MediaType;
@@ -35,16 +36,17 @@ public class SecurityConfig {
 
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http, JwtAuthenticationFilter jwt,
-                                                   ObjectMapper objectMapper) throws Exception {
+                                                   TraceIdFilter traceId, ObjectMapper objectMapper) throws Exception {
         http.csrf(csrf -> csrf.disable())
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
-                        .requestMatchers("/api/auth/**", "/ping", "/actuator/health/**", "/actuator/prometheus").permitAll()
+                        .requestMatchers("/api/auth/**", "/api/payments/webhook", "/api/ping", "/actuator/health/**", "/actuator/prometheus").permitAll()
                         .requestMatchers("/api/admin/**").hasRole("ADMIN")
                         .anyRequest().authenticated())
                 .exceptionHandling(ex -> ex
                         .authenticationEntryPoint(jsonError(objectMapper, ErrorCode.UNAUTHORIZED))
                         .accessDeniedHandler(jsonDenied(objectMapper)))
+                .addFilterBefore(traceId, UsernamePasswordAuthenticationFilter.class)
                 .addFilterBefore(jwt, UsernamePasswordAuthenticationFilter.class);
         return http.build();
     }

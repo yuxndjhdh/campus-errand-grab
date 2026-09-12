@@ -48,6 +48,11 @@ public abstract class IntegrationTestBase {
 
     @BeforeEach
     void resetProjectData() {
+        jdbc.update("DELETE FROM t_compensation");
+        jdbc.update("DELETE FROM t_dispute");
+        jdbc.update("DELETE FROM t_notification");
+        jdbc.update("DELETE FROM t_refund");
+        jdbc.update("DELETE FROM t_payment");
         jdbc.update("DELETE FROM t_ledger_entry");
         jdbc.update("DELETE FROM t_idempotent_op");
         jdbc.update("DELETE FROM t_outbox_event");

@@ -7,6 +7,7 @@ import com.yu.errand.monitoring.ReliabilityMetrics;
 import com.yu.errand.redis.DelayQueue;
 import com.yu.errand.redis.GrabMarker;
 import com.yu.errand.service.OrderService;
+import com.yu.errand.service.NotificationService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -26,16 +27,18 @@ public class OutboxWorker {
     private final GrabMarker marker;
     private final DelayQueue delayQueue;
     private final ReliabilityMetrics metrics;
+    private final NotificationService notifications;
 
     public OutboxWorker(OutboxClaimService claimService, OutboxStateService stateService,
                         OrderService orders, GrabMarker marker, DelayQueue delayQueue,
-                        ReliabilityMetrics metrics) {
+                        ReliabilityMetrics metrics, NotificationService notifications) {
         this.claimService = claimService;
         this.stateService = stateService;
         this.orders = orders;
         this.marker = marker;
         this.delayQueue = delayQueue;
         this.metrics = metrics;
+        this.notifications = notifications;
     }
 
     @Scheduled(fixedDelayString = "${app.outbox.poll-delay-ms:500}", initialDelayString = "${app.outbox.initial-delay-ms:1000}")
@@ -75,6 +78,10 @@ public class OutboxWorker {
     }
 
     private void publish(OutboxEvent event) {
+        if (event.eventType().endsWith("_NOTIFICATION")) {
+            notifications.markSent(event.bizId());
+            return;
+        }
         ErrandOrder order = orders.get(event.bizId());
         switch (event.eventType()) {
             case "ORDER_PUBLISHED" -> {

@@ -78,3 +78,7 @@ app:
   admin:
     username: ${ADMIN_USERNAME:}
     password: ${ADMIN_PASSWORD:}
+  payment:
+    enabled: ${PAYMENT_ENABLED:true}
+    webhook-secret: ${PAYMENT_WEBHOOK_SECRET:local-payment-webhook-secret}
+    webhook-skew-seconds: ${PAYMENT_WEBHOOK_SKEW_SECONDS:300}
