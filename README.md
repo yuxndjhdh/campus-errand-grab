@@ -79,12 +79,19 @@ python scripts/load_test.py --phase sustained --duration-seconds 300 --clients-p
 python scripts/benchmark_redis_fault.py --test-environment --clients 200 --output reports/benchmarks/raw/redis-fault-200-on-pool20.json
 python scripts/benchmark_settlement_retry.py --test-environment --output reports/benchmarks/raw/settlement-retry-pool20.json
 python scripts/generate_benchmark_report.py
+python scripts/validate_documentation_consistency.py
 ```
 
 `--takers` 是轮换使用的认证身份数量。若要避免每用户限流影响抢单基线，应按并发规模提供足够身份，或在报告中明确记录限流结果。执行器把每轮 JSON 和索引写入 `reports/benchmarks/raw/`；正式持续负载、Redis 故障和结算重试证据也写入该目录。正式结果、图表和环境参数见 [reports/benchmarks/benchmark-report.md](reports/benchmarks/benchmark-report.md)。
 
+每次 `load_test.py` 运行还会在原始 JSON 的 `runtimeMetrics` 中保存 Prometheus 白名单采样：Redis Lua 调用/成功/失败及 P50/P95/P99、DB CAS Timer、Hikari active/pending、JVM GC/线程/内存、进程/系统 CPU 和可用的 Docker 容器 CPU/内存。诊断矩阵完成后使用 `python scripts/generate_runtime_benchmark_report.py --index <run-index.json>` 生成独立的 [Redis 瓶颈报告](reports/benchmarks/runtime-bottleneck-report.md)；该报告不能替换正式验收矩阵。
+
 故障演示入口和断言见 [docs/failure-recovery.md](docs/failure-recovery.md)。四个脚本的结果写入 `reports/failure-tests/`，失败返回非零退出码，成功报告索引见 [reports/failure-tests/index.md](reports/failure-tests/index.md)。Prometheus 告警规则位于 `ops/prometheus/alerts.yml`，Grafana dashboard 位于 `ops/grafana/dashboards/campus-errand.json`；监控验证和脱敏指标快照见 [reports/monitoring/monitoring-validation.json](reports/monitoring/monitoring-validation.json)。
 
 压测脚本会把原始 JSON 保存到 `reports/` 或 `reports/benchmarks/raw/`，其中的性能数字只来自实际运行结果。当前本地正式报告状态为 `COMPLETE`：10 个热点/多订单变体各完成 1 次预热和 5 次正式运行，并补充了 300 秒持续负载、Redis 故障和结算重试证据。结果适用范围、异常样本和原始文件索引见 [reports/benchmarks/benchmark-report.md](reports/benchmarks/benchmark-report.md)；这些数字不表示系统的普遍容量上限。
+
+对外材料一致性检查结果见 [reports/document-consistency.json](reports/document-consistency.json)。它只把有原始 JSON、测试报告或本地配置证据的数字视为已覆盖，并单独标记未核验的外部 CI 记录。
+
+本轮工作区自动验收结果见 [reports/runtime/current-workspace-validation.json](reports/runtime/current-workspace-validation.json)。支付/退款本地沙箱证据见 [reports/payment/payment-validation-report.md](reports/payment/payment-validation-report.md)，同机灾备演练证据见 [reports/disaster-recovery/disaster-recovery-report.md](reports/disaster-recovery/disaster-recovery-report.md)；两者都明确不代表真实支付渠道、MySQL/Redis 高可用或生产 RPO/RTO。
 
 设计细节见 [docs/design.md](docs/design.md)，故障注入流程见 [docs/failure-recovery.md](docs/failure-recovery.md)，面试说明见 [docs/interview-notes.md](docs/interview-notes.md)。

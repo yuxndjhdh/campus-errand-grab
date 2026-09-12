@@ -24,7 +24,7 @@
 
 | 维度 | 量化结果 | 证据 |
 | --- | --- | --- |
-| 测试稳定性 | 53 个测试，0 失败、0 错误、0 跳过；空 Maven 仓库构建和完整测试连续三次通过 | `target/surefire-reports/`、`reports/runtime/maven-verify-current-run-*.log` |
+| 测试稳定性 | 67 个测试，0 失败、0 错误、0 跳过；空 Maven 仓库构建和完整测试连续三次通过 | `target/surefire-reports/`、`reports/runtime/maven-verify-current-run-*.log` |
 | 代码覆盖 | 指令覆盖率 79%，分支覆盖率 56% | `target/site/jacoco/index.html` |
 | 热点订单 500 并发 | Redis 前置过滤开启时中位 RPS 380.03，相比关闭时 351.95 高约 8.0%；中位 P99 从 1142.41 ms 降至 1056.69 ms | `reports/benchmarks/benchmark-report.md` |
 | 热点订单数据库压力 | 500 并发 5 次正式运行中，DB CAS 从 2500 次降至 5 次，减少约 99.8%；过滤率为 99.80% | `reports/benchmarks/benchmark-report.md`、`reports/benchmarks/raw/` |
@@ -33,13 +33,16 @@
 | Redis 故障 | 200 个客户端竞争同一订单仍只有 1 个赢家，HTTP 5xx 为 0；故障期间 Redis 降级指标从 0 增至 239、DB CAS 增加 200 次，恢复耗时约 7.4 秒且对账通过 | `reports/benchmarks/raw/redis-fault-200-on-pool20-20260911-174813.json` |
 | 结算幂等 | 20 个并发的送达请求只有 1 次成功，1 条结算幂等记录、3 条结算分录，账本总额为 0 | `reports/failure-tests/index.md`、最新成功报告 |
 | 远程 CI | 历史 GitHub Actions Run `34559235088` 成功完成 Maven 验证、Compose 校验、Docker 构建和报告上传；当前未提交工作区未再次执行远程 CI | GitHub Actions Run `34559235088` |
+| 本轮工作区验收 | 本地最终验收 `PASS`；远程 CI 未检查 | `reports/runtime/current-workspace-validation.json` |
+| 支付/退款沙箱 | 支付回调和退款各完成 1,000 次重复回放，通知/补偿/对账断言通过；仅限本地 SANDBOX | `reports/payment/payment-validation-report.md` |
+| 同机恢复演练 | Redis 与应用各 3 轮重启恢复，备份校验通过；不覆盖 HA、跨主机或 PITR | `reports/disaster-recovery/disaster-recovery-report.md` |
 
 ## 可直接放入简历的版本
 
 **Campus Errand Grab｜高并发抢单与资金一致性平台**  
 技术栈：Java 21、Spring Boot、MySQL、Redis、Flyway、Spring Security、Testcontainers、Toxiproxy、Prometheus、Grafana、Docker Compose
 
-- 基于 MySQL 条件更新和 Redis Lua 前置过滤实现热点订单抢单，Redis 故障时回退 DB CAS；500 并发场景下 Redis 过滤使中位 RPS 从 351.95 提升至 380.03（+8.0%），中位 P99 从 1142.41 ms 降至 1056.69 ms，DB CAS 请求从 2500 次降至 5 次。
+- 基于 MySQL 条件更新和 Redis Lua 前置过滤实现热点订单抢单，Redis 故障时回退 DB CAS；500 并发场景下 Redis 过滤使中位 RPS 从 351.95 提升至 380.03（+8.0%），中位 P99 从 1142.41 ms 降至 1056.69 ms，DB CAS 请求从 2500 次降至 5 次。证据：`reports/benchmarks/benchmark-report.md`。
 - 设计 AVAILABLE/FROZEN 托管账户、MINT/PLATFORM 系统账户和复式账本，将幂等键、账户变更、订单状态 CAS 与结算分录纳入同一事务；20 路并发重复结算仅 1 次成功，账本总额保持为 0。
 - 实现事务 Outbox 的 `SKIP LOCKED` 领取、租约、指数退避、`DEAD` 和人工重放，拆分 Redis 副作用与数据库状态更新；覆盖重复投递、租约过期、崩溃恢复和毒事件隔离。
 - 使用 Testcontainers、Toxiproxy 和 Compose 故障脚本验证 Redis 断连、Outbox 崩溃、重复结算和账实漂移；Redis 故障期间 200 客户端竞争仍保持单赢家、HTTP 5xx 为 0，恢复约 7.4 秒后五项资金对账不变量全部通过。

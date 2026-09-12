@@ -327,7 +327,7 @@ outbox_publish_success_total
 outbox_publish_failure_total
 outbox_publish_duration_seconds
 timeout_queue_lag_seconds
-settlement_dead_total
+settlement_dead
 ```
 
 Spring Boot 自带指标应覆盖：

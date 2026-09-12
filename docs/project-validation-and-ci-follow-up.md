@@ -31,12 +31,12 @@
 
 本轮本地验收已经完成：
 
-- Docker Desktop、WSL2 和 Docker Engine 可用；临时空 Maven 仓库构建和完整测试已连续三次通过，每次 53 个测试、0 失败、0 错误、0 跳过。
+- Docker Desktop、WSL2 和 Docker Engine 可用；临时空 Maven 仓库构建和完整测试已连续三次通过，每次 67 个测试、0 失败、0 错误、0 跳过。
 - Compose、Flyway、冒烟流程和 readiness/liveness 证据已写入 `reports/runtime/`。
 - Redis、Outbox、重复结算和对账漂移四类故障脚本均有成功报告，索引见 `reports/failure-tests/index.md`。
 - Prometheus 指标、Grafana 数据源/面板、DEAD/对账/队列告警均已实际验证并恢复；证据见 `reports/monitoring/`。
 - 正式压测矩阵、300 秒持续负载、Redis 故障和结算重试均已完成；正式报告状态为 `COMPLETE`。
-- 仍未完成的只有本轮明确不处理的 Git 提交/推送和远程 CI 全绿记录。
+- 本文所覆盖的基础验收已完成；当前更细的 W1～W6 影响优化状态见 `docs/unfinished-impact-work-execution-plan.md`。本轮明确不处理 Git 提交/推送和远程 CI 全绿记录。
 
 ## 3. 优先级与执行顺序
 
